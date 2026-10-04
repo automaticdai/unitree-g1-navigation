@@ -1,0 +1,28 @@
+/**:
+  ros__parameters:
+    # EXAMPLES, NOT MEASURED G1 CALIBRATION. Keep false until measured on your mount.
+    calibration_confirmed: false
+    # Rigid nominal ground-level base_link -> Mid360 internal IMU, metres / xyzw.
+    # A moving waist/head mount requires joint-dependent transforms (not supported yet).
+    base_to_imu_xyz: [0.0, 0.0, 1.0]
+    base_to_imu_xyzw: [0.0, 0.0, 0.0, 1.0]
+    initial_imu_height: 1.0
+    self_filter_min: [-0.25, -0.35, -0.1]
+    self_filter_max: [0.25, 0.35, 1.8]
+    obstacle_min_height: 0.10
+    obstacle_max_height: 1.9
+    max_range: 15.0
+    voxel_resolution: 0.08
+    max_voxels: 2000000
+    grid_resolution: 0.1
+    min_fitness: 0.65
+    max_rmse: 0.15
+    # Additional interlock; setting enable_hardware in launch alone is insufficient.
+    hardware_validation_complete: false
+    network_interface: ''
+    allowed_fsm_ids: [-1]  # Replace with verified walking-controller FSM IDs.
+    command_duration: 0.15
+    command_timeout: 0.25
+    health_timeout: 0.75
+    max_vx: 0.2
+    max_wz: 0.3

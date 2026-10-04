@@ -1,0 +1,9 @@
+repositories:
+  Livox-SDK2:
+    type: git
+    url: https://github.com/Livox-SDK/Livox-SDK2.git
+    version: c0796f04c143143899c87a773d9f6b7136453c0b
+  unitree_sdk2_python:
+    type: git
+    url: https://github.com/unitreerobotics/unitree_sdk2_python.git
+    version: 814556d15970dd2ecf1c9984e845ca02ab07e206

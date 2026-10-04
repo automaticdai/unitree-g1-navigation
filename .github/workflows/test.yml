@@ -1,0 +1,30 @@
+name: Tests
+on: [push, pull_request]
+jobs:
+  algorithms:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: pip install 'numpy<2' scipy pyyaml pytest
+      - run: python -m pytest -q
+  ros:
+    runs-on: ubuntu-22.04
+    container: ros:humble-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ROS runtime dependencies
+        run: |
+          apt-get update
+          apt-get install -y python3-scipy python3-pytest ros-humble-message-filters ros-humble-sensor-msgs-py ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-nav2-collision-monitor
+      - name: Build package and exercise ROS adapters
+        shell: bash
+        run: |
+          source /opt/ros/humble/setup.bash
+          colcon build --base-paths src --symlink-install
+          source install/setup.bash
+          python3 -m pytest -q
+          ros2 launch g1_navigation bringup.launch.py --show-args
+          timeout 90s python3 scripts/smoke_navigation.py

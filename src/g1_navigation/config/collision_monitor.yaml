@@ -1,0 +1,33 @@
+collision_monitor:
+  ros__parameters:
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    cmd_vel_in_topic: cmd_vel
+    cmd_vel_out_topic: cmd_vel_safe
+    transform_tolerance: 0.3
+    source_timeout: 0.3
+    stop_pub_timeout: 1.0
+    base_shift_correction: true
+    polygons: [stop_zone, slow_zone]
+    stop_zone:
+      type: polygon
+      points: [0.65, 0.65, 0.65, -0.65, -0.65, -0.65, -0.65, 0.65]
+      action_type: stop
+      max_points: 0
+      visualize: true
+      polygon_pub_topic: stop_zone
+    slow_zone:
+      type: polygon
+      points: [1.0, 0.85, 1.0, -0.85, -1.0, -0.85, -1.0, 0.85]
+      action_type: slowdown
+      max_points: 0
+      slowdown_ratio: 0.3
+      visualize: true
+      polygon_pub_topic: slow_zone
+    observation_sources: [cloud]
+    cloud:
+      type: pointcloud
+      topic: /perception/obstacles
+      min_height: 0.1
+      max_height: 1.9
+      enabled: true
