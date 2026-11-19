@@ -165,6 +165,19 @@ def run(smoke, approach_extent):
     smoke.hold(1., lambda: s['status'].startswith('ARMED') and near(s['preview'], 0., 1e-6),
                'Deadman release disarmed or moved the robot')
 
+    # 4b. Wall within the direction margin (outside the padded footprint, inside the forward-
+    # extended one): forward is held at zero, but reversing away is not frozen.
+    probe.points = scene(0.45)
+    smoke.spin(1.)
+    joy.update(lin=1., deadman=1)
+    smoke.require(3., lambda: near(s['cmd_vel'], MAX_VX, 1e-3), 'Gamepad never ramped to max_vx (margin)')
+    smoke.hold(1., lambda: near(s['preview'], 0., 1e-6), 'Forward motion allowed inside the direction margin')
+    joy['lin'] = -1.
+    if not smoke.spin(3., lambda: near(s['preview'], -MAX_VX_REVERSE, 0.01)):
+        raise RuntimeError(f'Reverse frozen with the wall inside only the direction margin: {s}')
+    joy.update(lin=0., deadman=0)
+    smoke.spin(0.5)
+
     # 5. Wall inside the approach margin (outside stop zone and self-filter): close-contact freeze.
     probe.points = scene(0.38)
     smoke.spin(1.)  # Let the new cloud reach the collision monitor.
@@ -185,6 +198,7 @@ def run(smoke, approach_extent):
                   'Joystick loss did not disarm the gate')
 
     print(f'PASS: approach slowed forward to {forward_safe:.3f} m/s (wall 0.15 m ahead); '
+          f'wall in the direction margin held forward at zero and allowed reverse; '
           f'reverse away passed at {reverse_preview:.3f} m/s; deadman release held zero while armed; '
           f'close contact (wall 0.38 m) froze forward, reverse gave {frozen_reverse:.3f} m/s; '
           f'joystick loss disarmed ({s["status"]}).')

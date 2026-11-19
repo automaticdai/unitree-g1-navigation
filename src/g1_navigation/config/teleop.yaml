@@ -9,3 +9,9 @@ gamepad_teleop:
                     max_wz: 0.3, accel_vx: 0.4, accel_wz: 0.8, joy_timeout: 0.25}
 command_bridge:
   ros__parameters: {profile: teleop, max_vx_reverse: 0.1}
+footprint_publisher:
+  # Approach footprint pushed out this far along the commanded direction, so the
+  # approach stops the robot before the obstacle reaches the close-contact freeze zone
+  # (the plain padded footprint): gait sway and stopping overshoot (~3 cm each) must
+  # not freeze reversing away. 0 = fixed padded footprint.
+  ros__parameters: {direction_margin: 0.10}

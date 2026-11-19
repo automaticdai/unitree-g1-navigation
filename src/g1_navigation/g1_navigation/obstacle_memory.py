@@ -11,17 +11,27 @@ a beam in the current scan travels through it (a return in the same direction,
 farther away) - evidence that the space is now free. Points that cannot be
 seen through (blind zone, gaps in the scan pattern) are kept, bounded by
 max_age, radius and max_points.
+
+Points above the sensor are kept only `above_sensor_age` after they were last
+observed. The upside-down head Mid360 sees at most ~+7 deg above horizontal, so
+nothing above it can ever be seen through: a passing person's head, hit only
+during the robot's pitch sway, would otherwise block driving for max_age. What is
+still in view keeps being re-observed and stays. The blind zone the memory exists
+for (near the feet) is below the sensor and keeps max_age.
 """
 import numpy as np
 
 
 class ObstacleMemory:
     def __init__(self, voxel=0.05, max_age=30.0, radius=3.0, clear_margin=0.10,
-                 angle_resolution=np.radians(1.0), max_points=50000):
-        values = np.array([voxel, max_age, radius, clear_margin, angle_resolution, max_points], float)
+                 angle_resolution=np.radians(1.0), max_points=50000, above_sensor_age=None):
+        above_sensor_age = max_age if above_sensor_age is None else above_sensor_age
+        values = np.array([voxel, max_age, radius, clear_margin, angle_resolution, max_points,
+                           above_sensor_age], float)
         if not np.isfinite(values).all() or np.any(values <= 0) or angle_resolution > np.radians(10.):
             raise ValueError('Invalid obstacle memory configuration')
         self.voxel, self.max_age, self.radius = voxel, max_age, radius
+        self.above_sensor_age = min(above_sensor_age, max_age)
         self.clear_margin, self.resolution, self.max_points = clear_margin, angle_resolution, int(max_points)
         self.reset()
 
@@ -59,7 +69,9 @@ class ObstacleMemory:
             points, seen = points[~seen_through], seen[~seen_through]
         points = np.vstack([points, obstacles])
         seen = np.r_[seen, np.full(len(obstacles), float(now))]
-        keep = ((now - seen) <= self.max_age) & (np.hypot(*(points[:, :2] - robot).T) <= self.radius)
+        age = now - seen
+        keep = ((age <= self.max_age) & (np.hypot(*(points[:, :2] - robot).T) <= self.radius)
+                & ((points[:, 2] <= sensor[2]) | (age <= self.above_sensor_age)))
         points, seen = points[keep], seen[keep]
         if len(points):
             # One point per voxel, newest observation wins.

@@ -15,6 +15,10 @@
     # Obstacles persist until a LiDAR beam passes through them (0 = single scans only).
     obstacle_memory_max_age: 30.0
     obstacle_memory_radius: 3.0
+    # Points above the sensor are kept only this long after last observed (s);
+    # -1 keeps them for max_age. Set for sensors that cannot see above themselves
+    # (robot_g1_head.yaml: upside-down head Mid360).
+    obstacle_memory_above_sensor_age: -1.0
     voxel_resolution: 0.08
     max_voxels: 2000000
     grid_resolution: 0.1

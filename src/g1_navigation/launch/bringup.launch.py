@@ -69,7 +69,8 @@ def build(context):
             teleop_config = arg('teleop_config')
             overrides = yaml.safe_load((share / 'config/nav2_overrides.yaml').read_text())
             actions.append(Node(package='g1_navigation', executable='footprint_publisher', output='screen',
-                                parameters=[{'points': padded_footprint(overrides), 'use_sim_time': replay}]))
+                                parameters=[teleop_config, {'points': padded_footprint(overrides),
+                                                            'use_sim_time': replay}]))
             footprint_topic = {'approach_zone.footprint_topic': TELEOP_FOOTPRINT_TOPIC}
             actions.extend(collision_monitor(share, replay, footprint_topic) + [
                 Node(package='g1_navigation', executable='gamepad_teleop', output='screen',

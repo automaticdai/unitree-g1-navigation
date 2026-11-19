@@ -97,3 +97,32 @@ def test_invalid_configuration_and_reset():
     memory.update(SENSOR, box(1.5), box(1.5), (0., 0.), 0.)
     memory.reset()
     assert len(memory.points) == 0
+
+
+def test_points_above_the_sensor_expire_after_above_sensor_age():
+    memory = ObstacleMemory(max_age=30., above_sensor_age=1.0)
+    head = np.array([[1.5, 0., 1.6], [1.5, 0.1, 1.65]])   # above the 1.26 m sensor
+    low = box(1.5, y=1.0)                                   # below it, in the blind zone later
+    memory.update(SENSOR, np.vstack([head, low]), np.vstack([head, low]), (0., 0.), 0.)
+    # Nothing re-observes either (out of view): the low box stays, the head goes.
+    kept = memory.update(SENSOR, wall(4.), np.empty((0, 3)), (0., 0.), 0.9)
+    assert near(kept, head[0]) and near(kept, [1.6, 1.0, 0.3])
+    kept = memory.update(SENSOR, wall(4.), np.empty((0, 3)), (0., 0.), 1.5)
+    assert not near(kept, head[0]) and near(kept, [1.6, 1.0, 0.3])
+
+
+def test_above_sensor_points_still_observed_are_kept():
+    memory = ObstacleMemory(max_age=30., above_sensor_age=1.0)
+    shelf = np.array([[2.0, 0., 1.5]])
+    for t in np.arange(0., 5., 0.5):  # re-observed every 0.5 s
+        kept = memory.update(SENSOR, shelf, shelf, (0., 0.), t)
+    assert near(kept, shelf[0])
+
+
+def test_above_sensor_age_defaults_to_max_age():
+    memory = ObstacleMemory(max_age=2.)
+    head = np.array([[1.5, 0., 1.6]])
+    memory.update(SENSOR, head, head, (0., 0.), 0.)
+    assert near(memory.update(SENSOR, wall(4.), np.empty((0, 3)), (0., 0.), 1.9), head[0])
+    with pytest.raises(ValueError):
+        ObstacleMemory(above_sensor_age=0.)

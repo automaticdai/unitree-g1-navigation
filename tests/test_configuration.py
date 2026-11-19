@@ -147,7 +147,8 @@ def test_g1_head_mount_matches_measured_up_vector():
     head = yaml.safe_load((CONFIG / 'robot_g1_head.yaml').read_text())['/**']['ros__parameters']
     base = yaml.safe_load((CONFIG / 'robot.yaml').read_text())['/**']['ros__parameters']
     assert set(head) == set(base) and not head['calibration_confirmed']
-    for key in set(base) - {'base_to_imu_xyz', 'base_to_imu_xyzw', 'initial_imu_height'}:
+    for key in set(base) - {'base_to_imu_xyz', 'base_to_imu_xyzw', 'initial_imu_height',
+                            'obstacle_memory_above_sensor_age'}:
         assert head[key] == base[key], key
     mount = transform(head['base_to_imu_xyz'], head['base_to_imu_xyzw'])
     up = np.array([-0.0039, 0.0565, -0.9984])
