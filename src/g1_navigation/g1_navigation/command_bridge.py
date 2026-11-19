@@ -9,13 +9,15 @@ import time
 
 from action_msgs.srv import CancelGoal
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
+from builtin_interfaces.msg import Duration
 from geometry_msgs.msg import Twist
 from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool, Trigger
+from visualization_msgs.msg import Marker
 from .ros_helpers import parameter, seconds, spin
-from .safety import CommandGate, Limits
+from .safety import CommandGate, Limits, required_health
 
 
 class CommandBridge(Node):
@@ -24,11 +26,18 @@ class CommandBridge(Node):
         self.hardware = parameter(self, 'enable_hardware', False)
         self.lease = parameter(self, 'command_duration', 0.15)
         self.lock = threading.RLock()
+        self.profile = parameter(self, 'profile', 'navigation')
+        max_vx_reverse = parameter(self, 'max_vx_reverse', 0.0)
+        # Fail early, before any publisher, subscription or SDK connection exists.
+        required = required_health(self.profile, self.hardware)
+        if self.profile == 'navigation' and max_vx_reverse != 0.0:
+            raise ValueError('max_vx_reverse is only allowed in the teleop profile')
         self.gate = CommandGate(Limits(
             max_vx=parameter(self, 'max_vx', 0.2),
+            max_vx_reverse=max_vx_reverse,
             max_wz=parameter(self, 'max_wz', 0.3),
             command_timeout=parameter(self, 'command_timeout', 0.25),
-            health_timeout=parameter(self, 'health_timeout', 0.75)))
+            health_timeout=parameter(self, 'health_timeout', 0.75)), required=required)
         self.client = None
         self.worker_stop = threading.Event()
         self.was_armed = False
@@ -36,18 +45,23 @@ class CommandBridge(Node):
         self.cancel_failed = False
         self.preview = self.create_publisher(Twist, '/g1/command_preview', 10)
         self.status = self.create_publisher(String, '/g1/autonomy_status', 10)
+        self.marker = self.create_publisher(Marker, '/g1/status_marker', 1)
         self.create_subscription(Twist, '/cmd_vel_safe', self.command, 1)
-        for name in ('perception', 'localization'):
+        names = ('perception', 'localization') if self.profile == 'navigation' else ('perception', 'operator')
+        for name in names:
             self.create_subscription(DiagnosticArray, f'/health/{name}',
                                      lambda msg, n=name: self.diagnostic(n, msg), 1)
         self.create_service(SetBool, '/g1/arm', self.arm)
         self.create_service(Trigger, '/g1/stop', self.stop)
-        self.cancel_clients = [self.create_client(CancelGoal, f'/{action}/_action/cancel_goal')
-                               for action in ('navigate_to_pose', 'navigate_through_poses')]
+        # Teleop has no Nav2 goals to cancel.
+        self.cancel_clients = [] if self.profile == 'teleop' else [
+            self.create_client(CancelGoal, f'/{action}/_action/cancel_goal')
+            for action in ('navigate_to_pose', 'navigate_through_poses')]
         if self.hardware:
             self.init_hardware()
         else:
-            self.create_subscription(Bool, '/g1/operator_heartbeat', self.operator, 1)
+            if self.profile == 'navigation':
+                self.create_subscription(Bool, '/g1/operator_heartbeat', self.operator, 1)
             self.get_logger().warning('DRY RUN: no Unitree SDK connection or robot commands')
         # A stalled /clock must never freeze the command watchdog.
         self.steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
@@ -93,7 +107,7 @@ class CommandBridge(Node):
         axes = (msg.lx, msg.ly, msg.rx, msg.ry)
         neutral = msg.keys == 0 and all(math.isfinite(v) and abs(v) < 0.1 for v in axes)
         with self.lock:
-            self.gate.update_health('operator', neutral, time.monotonic())
+            self.gate.update_health('remote', neutral, time.monotonic())
             if not neutral:
                 self.gate.stop('handheld controller takeover')
 
@@ -177,7 +191,21 @@ class CommandBridge(Node):
         preview = Twist()
         preview.linear.x, preview.linear.y, preview.angular.z = output
         self.preview.publish(preview)
-        self.status.publish(String(data=f'{"ARMED" if armed else "DISARMED"}: {reason}'))
+        label = f'{"ARMED" if armed else "DISARMED"}: {reason}'
+        self.status.publish(String(data=label))
+        marker = Marker()
+        marker.header.frame_id = 'base_footprint'
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns, marker.id = 'g1_status', 0
+        marker.type, marker.action = Marker.TEXT_VIEW_FACING, Marker.ADD
+        marker.pose.position.z = 2.0
+        marker.pose.orientation.w = 1.0
+        marker.scale.z = 0.15
+        marker.color.r, marker.color.g, marker.color.b, marker.color.a = (
+            (0.0, 1.0, 0.0, 1.0) if armed else (1.0, 0.0, 0.0, 1.0))
+        marker.lifetime = Duration(sec=0, nanosec=500_000_000)
+        marker.text = f'{label}\nvx {output[0]:.2f} wz {output[2]:.2f}'
+        self.marker.publish(marker)
 
     def destroy_node(self):
         self.worker_stop.set()

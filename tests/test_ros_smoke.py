@@ -86,6 +86,66 @@ def test_ros_dry_bridge_never_imports_sdk_and_rejects_missing_health():
         node.destroy_node()
 
 
+def _teleop_args(*extra):
+    args = ['--ros-args', '-p', 'profile:=teleop']
+    for item in extra:
+        args += ['-p', item]
+    return args
+
+
+def _feed(node, name):
+    msg = DiagnosticArray()
+    msg.header.stamp = node.get_clock().now().to_msg()
+    msg.status = [DiagnosticStatus(name=name, level=DiagnosticStatus.OK)]
+    node.diagnostic(name, msg)
+
+
+def test_ros_teleop_bridge_requires_operator_health_not_localization():
+    rclpy.init(args=_teleop_args())
+    node = CommandBridge()
+    try:
+        node.tick()
+        assert node.cancel_clients == []
+        _feed(node, 'perception')
+        assert not node.arm(SetBool.Request(data=True), SetBool.Response()).success
+        _feed(node, 'operator')
+        response = node.arm(SetBool.Request(data=True), SetBool.Response())
+        assert response.success, response.message
+        assert node.arm(SetBool.Request(data=False), SetBool.Response()).success
+        node.tick()
+        assert not node.cancel_failed
+        _feed(node, 'perception')
+        _feed(node, 'operator')
+        response = node.arm(SetBool.Request(data=True), SetBool.Response())
+        assert response.success, response.message
+    finally:
+        node.destroy_node()
+
+
+def test_ros_teleop_bridge_allows_bounded_reverse():
+    import time
+    from geometry_msgs.msg import Twist
+    rclpy.init(args=_teleop_args('max_vx_reverse:=0.1'))
+    node = CommandBridge()
+    try:
+        node.tick()
+        _feed(node, 'perception')
+        _feed(node, 'operator')
+        assert node.arm(SetBool.Request(data=True), SetBool.Response()).success
+        msg = Twist()
+        msg.linear.x = -1.0
+        node.command(msg)
+        assert node.gate.output(time.monotonic())[0] == -0.1
+    finally:
+        node.destroy_node()
+
+
+def test_ros_navigation_bridge_rejects_reverse_config():
+    rclpy.init(args=['--ros-args', '-p', 'max_vx_reverse:=0.1'])
+    with pytest.raises(ValueError):
+        CommandBridge()
+
+
 def test_mapping_launch_has_no_velocity_or_navigation_nodes(tmp_path):
     import importlib.util
     from pathlib import Path
