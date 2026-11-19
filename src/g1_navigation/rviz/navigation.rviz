@@ -98,6 +98,17 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
       Namespaces: {}
+    - Class: rviz_default_plugins/Image
+      Name: Camera (D435)
+      Enabled: true
+      # Preview only: head D435i colour from scripts/pc2_camera.sh on the robot's PC2.
+      Topic:
+        Value: /camera/color/image_raw
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+      Normalize Range: true
     - Class: rviz_default_plugins/Map
       Name: Map
       Enabled: true
@@ -178,3 +189,5 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: true
+  Camera (D435):
+    collapsed: false

@@ -131,10 +131,12 @@ def test_rviz_layouts_reference_topics():
     assert manager['Global Options']['Fixed Frame'] == 'odom'
     assert {'/mapping/map_cloud', '/perception/obstacles', '/approach_zone',
             '/stop_zone', '/g1/status_marker'} <= topics
+    assert '/camera/color/image_raw' in topics
     _, manager, topics = _rviz_topics('navigation')
     assert manager['Global Options']['Fixed Frame'] == 'map'
     assert {'/map', '/plan', '/local_costmap/costmap', '/approach_zone', '/stop_zone',
             '/perception/obstacles', '/g1/status_marker'} <= topics
+    assert '/camera/color/image_raw' in topics
     tools = {tool['Class'] for tool in manager['Tools']}
     assert {'rviz_default_plugins/SetInitialPose', 'rviz_default_plugins/SetGoal'} <= tools
 
