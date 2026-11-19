@@ -9,7 +9,12 @@ collision_monitor:
     # Humble drops a stale source silently (treated as no obstacles); the command
     # bridge's perception health from sensor_adapter is what stops the robot then.
     source_timeout: 0.3
-    stop_pub_timeout: 1.0
+    # Humble stops republishing zero velocity stop_pub_timeout after the robot stops,
+    # which starves the command gate and disarms it ("command stale") whenever the
+    # operator holds still. Output is driven only by cmd_vel input, so a long timeout
+    # keeps zeros flowing exactly while the gamepad/Nav2 is alive; input loss still
+    # stops /cmd_vel_safe and the gate times out.
+    stop_pub_timeout: 1000000.0
     base_shift_correction: true
     # No direction-agnostic slowdown zone: it would also slow escape motions.
     polygons: [stop_zone, approach_zone]

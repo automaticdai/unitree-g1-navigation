@@ -71,6 +71,14 @@ def test_collision_monitor_uses_approach_without_slowdown():
     assert params['cmd_vel_in_topic'] == 'cmd_vel' and params['cmd_vel_out_topic'] == 'cmd_vel_safe'
 
 
+def test_collision_monitor_keeps_forwarding_zero_commands():
+    # Humble stops republishing zeros after stop_pub_timeout; the command gate would then
+    # disarm ("command stale") whenever the operator holds still.
+    params = yaml.safe_load((CONFIG / 'collision_monitor.yaml').read_text())['collision_monitor']['ros__parameters']
+    gate = yaml.safe_load((CONFIG / 'robot.yaml').read_text())['/**']['ros__parameters']
+    assert params['stop_pub_timeout'] > 3600 * gate['command_timeout']
+
+
 def test_teleop_footprint_matches_padded_nav2_footprint():
     from math import copysign
     from g1_navigation.configuration import padded_footprint

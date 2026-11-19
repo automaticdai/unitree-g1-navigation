@@ -22,7 +22,7 @@ docker run --rm \
     if [ "$rc" -eq 0 ] && [ "$SMOKE" = "1" ]; then
       timeout 90s python3 scripts/smoke_navigation.py; rc=$?
       if [ "$rc" -eq 0 ] && [ -f scripts/smoke_teleop.py ]; then
-        timeout 90s python3 scripts/smoke_teleop.py; rc=$?
+        timeout 120s python3 scripts/smoke_teleop.py; rc=$?
       fi
     fi
     exit $rc

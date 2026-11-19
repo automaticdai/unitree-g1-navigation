@@ -18,7 +18,7 @@ jobs:
       - name: Install ROS runtime dependencies
         run: |
           apt-get update
-          apt-get install -y python3-scipy python3-pytest ros-humble-message-filters ros-humble-sensor-msgs-py ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-nav2-collision-monitor
+          apt-get install -y python3-scipy python3-pytest ros-humble-message-filters ros-humble-sensor-msgs-py ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-nav2-collision-monitor ros-humble-joy
       - name: Build package and exercise ROS adapters
         shell: bash
         run: |
@@ -28,3 +28,4 @@ jobs:
           python3 -m pytest -q
           ros2 launch g1_navigation bringup.launch.py --show-args
           timeout 90s python3 scripts/smoke_navigation.py
+          timeout 120s python3 scripts/smoke_teleop.py
