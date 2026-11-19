@@ -9,6 +9,7 @@ from sensor_msgs.msg import PointCloud2
 from diagnostic_msgs.msg import DiagnosticArray
 from tf2_ros import TransformBroadcaster
 from .geometry import apply, initial_alignment, transform, planar, relative_velocity
+from .obstacle_memory import ObstacleMemory
 from .ros_helpers import parameter, matrix_from_pose, fill_pose, seconds, cloud, xyz, health, tf_message, spin
 
 
@@ -24,6 +25,12 @@ class SensorAdapter(Node):
         self.min_z = parameter(self, 'obstacle_min_height', 0.10)
         self.max_z = parameter(self, 'obstacle_max_height', 1.9)
         self.max_range = parameter(self, 'max_range', 15.0)
+        # Keep obstacles until a beam sees through them (blind zone near the feet,
+        # sparse scan pattern). max_age 0 publishes single scans only.
+        memory_age = parameter(self, 'obstacle_memory_max_age', 30.0)
+        self.memory = ObstacleMemory(max_age=memory_age, radius=parameter(
+            self, 'obstacle_memory_radius', 3.0)) if memory_age != 0 else None
+        self.memory_pose = None
         values = np.r_[self.lower, self.upper, self.floor_offset, self.min_z, self.max_z, self.max_range]
         if (not np.isfinite(values).all() or self.lower.shape != (3,) or self.upper.shape != (3,)
                 or np.any(self.lower >= self.upper) or self.floor_offset <= 0
@@ -89,6 +96,11 @@ class SensorAdapter(Node):
             self.odom_pub.publish(output)
             self.scans.publish(cloud(world, 'odom', stamp))
             selected = world[(world[:, 2] >= self.min_z) & (world[:, 2] <= self.max_z)]
+            if self.memory:
+                if not self.pose_continuous(current_time, flat):
+                    self.memory.reset()
+                self.memory_pose = (current_time, flat)
+                selected = self.memory.update(imu[:3, 3], world, selected, flat[:2, 3], current_time)
             self.obstacles.publish(cloud(apply(np.linalg.inv(flat), selected), 'base_footprint', stamp))
             tilt = np.linalg.norm(Rotation.from_matrix(base[:3, :3]).as_euler('xyz')[:2])
             ok = self.calibrated and valid_motion and tilt < 0.35
@@ -97,6 +109,17 @@ class SensorAdapter(Node):
         except (ValueError, TypeError) as exc:
             self.previous = None
             health(self, self.diagnostics, 'perception', False, str(exc), stamp)
+
+    def pose_continuous(self, current_time, flat):
+        """True if remembered points are still valid in odom (no gap or jump since the last scan)."""
+        if self.memory_pose is None:
+            return False
+        old_time, old = self.memory_pose
+        try:
+            velocity, angular = relative_velocity(old, flat, current_time - old_time)
+        except ValueError:
+            return False
+        return np.linalg.norm(velocity) <= 2.0 and np.linalg.norm(angular) <= 3.0
 
 
 def main():

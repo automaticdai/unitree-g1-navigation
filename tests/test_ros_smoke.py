@@ -47,6 +47,48 @@ def test_ros_cloud_and_adapter():
         node.destroy_node()
 
 
+def _stamp(seconds):
+    from builtin_interfaces.msg import Time
+    return Time(sec=int(seconds), nanosec=int(round((seconds % 1) * 1e9)))
+
+
+def test_ros_adapter_remembers_obstacles_until_seen_through():
+    rclpy.init()
+    node = SensorAdapter()  # default mount: IMU 1 m above the base, level
+    published = []
+    node.obstacles.publish = lambda msg: published.append(xyz(msg))
+    box = np.array([[x, y, z] for x in (1.5, 1.55) for y in (-0.05, 0., 0.05) for z in (0.2, 0.3)])
+    far = np.array([[4., y, z] for y in np.arange(-1., 1.01, 0.05) for z in (0.5, 1.0, 1.5)])
+
+    def scan(t, robot_x, base_points):
+        odom = Odometry()
+        odom.header.frame_id, odom.child_frame_id = 'camera_init', 'body'
+        odom.header.stamp = _stamp(t)
+        odom.pose.pose.position.x = robot_x
+        odom.pose.pose.orientation.w = 1.
+        node.process(odom, cloud(base_points - [robot_x, 0., 1.], 'body', _stamp(t)))
+        return published[-1]
+    try:
+        scan(100.0, 0., np.vstack([box, far]))
+        # Walked 0.15 m closer; this scan no longer sees the box (blind zone): still reported,
+        # at its true distance from the robot.
+        kept = scan(100.1, 0.15, far)
+        assert np.min(np.linalg.norm(kept - [1.35, 0., 0.25], axis=1)) < 0.08
+        # Beams through where the box was (ending twice as far from the sensor) clear it.
+        sensor = np.array([0.15, 0., 1.])
+        kept = scan(100.2, 0.15, np.vstack([far, sensor + 2. * (box - sensor)]))
+        assert not np.any(np.linalg.norm(kept - [1.35, 0., 0.25], axis=1) < 0.1)
+        # Pose gap: memory resets rather than trusting an old frame.
+        assert np.min(np.linalg.norm(scan(100.3, 0.15, np.vstack([box, far])) - [1.35, 0., 0.25], axis=1)) < 0.08
+        n = len(published)
+        scan(101.5, 0.15, far)  # interval too long: rejected, nothing published
+        assert len(published) == n
+        kept = scan(101.6, 0.15, far)
+        assert not np.any(np.linalg.norm(kept - [1.35, 0., 0.25], axis=1) < 0.1)
+    finally:
+        node.destroy_node()
+
+
 def test_ros_map_save_service(tmp_path):
     directory = tmp_path / 'room'
     rclpy.init(args=['--ros-args', '-p', f'session_directory:={directory}'])

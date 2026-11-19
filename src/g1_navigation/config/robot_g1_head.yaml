@@ -19,6 +19,9 @@
     obstacle_min_height: 0.10
     obstacle_max_height: 1.9
     max_range: 15.0
+    # Obstacles persist until a LiDAR beam passes through them (0 = single scans only).
+    obstacle_memory_max_age: 30.0
+    obstacle_memory_radius: 3.0
     voxel_resolution: 0.08
     max_voxels: 2000000
     grid_resolution: 0.1
