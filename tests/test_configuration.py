@@ -1,5 +1,6 @@
 from pathlib import Path
 import xml.etree.ElementTree as ET
+import pytest
 import yaml
 from g1_navigation.configuration import merge, set_sim_time
 
@@ -41,3 +42,85 @@ def test_dependencies_are_commit_pinned():
         for entry in entries.values():
             assert len(entry['version']) == 40
             int(entry['version'], 16)
+
+
+def _nav2_footprint(costmap='local_costmap'):
+    overrides = yaml.safe_load((CONFIG / 'nav2_overrides.yaml').read_text())
+    params = overrides[costmap][costmap]['ros__parameters']
+    return yaml.safe_load(params['footprint']), params['footprint_padding']
+
+
+def test_collision_monitor_uses_approach_without_slowdown():
+    params = yaml.safe_load((CONFIG / 'collision_monitor.yaml').read_text())['collision_monitor']['ros__parameters']
+    polygons = {name: params[name] for name in params['polygons']}
+    approach, stop = polygons['approach_zone'], polygons['stop_zone']
+    assert approach['action_type'] == 'approach'
+    assert approach['time_before_collision'] == 1.2
+    # Humble 1.1.20 takes the approach shape only from footprint_topic (points are ignored);
+    # navigation uses the costmap's padded footprint, teleop overrides the topic in launch.
+    assert approach['footprint_topic'] == '/local_costmap/published_footprint'
+    assert 'points' not in approach
+    # 1.1.20: approach freezes when points inside >= max_points; stop trips when > max_points.
+    # Both therefore act on a single point.
+    assert approach['max_points'] == 1
+    assert stop['action_type'] == 'stop' and stop['max_points'] == 0
+    footprint, padding = _nav2_footprint()
+    assert stop['points'] == [value for point in footprint for value in point]
+    assert 0 < padding <= 0.1
+    assert all(polygon['action_type'] != 'slowdown' for polygon in polygons.values())
+    assert params['cmd_vel_in_topic'] == 'cmd_vel' and params['cmd_vel_out_topic'] == 'cmd_vel_safe'
+
+
+def test_teleop_footprint_matches_padded_nav2_footprint():
+    from math import copysign
+    from g1_navigation.configuration import padded_footprint
+    footprint, padding = _nav2_footprint()
+    assert _nav2_footprint('global_costmap') == (footprint, padding)
+    overrides = yaml.safe_load((CONFIG / 'nav2_overrides.yaml').read_text())
+    expected = [[x + copysign(padding, x), y + copysign(padding, y)] for x, y in footprint]
+    assert padded_footprint(overrides) == pytest.approx([v for point in expected for v in point])
+
+
+def test_teleop_config_limits():
+    teleop = yaml.safe_load((CONFIG / 'teleop.yaml').read_text())
+    robot = yaml.safe_load((CONFIG / 'robot.yaml').read_text())['/**']['ros__parameters']
+    gamepad = teleop['gamepad_teleop']['ros__parameters']
+    bridge = teleop['command_bridge']['ros__parameters']
+    assert gamepad['max_vx_reverse'] == 0.1 and bridge['max_vx_reverse'] == 0.1
+    assert gamepad['joy_timeout'] == 0.25
+    assert bridge['profile'] == 'teleop'
+    assert gamepad['max_vx'] == robot['max_vx'] and gamepad['max_wz'] == robot['max_wz']
+    for name in ('deadzone', 'max_vx', 'max_vx_reverse', 'max_wz', 'accel_vx', 'accel_wz', 'joy_timeout'):
+        assert isinstance(gamepad[name], float), name
+    for name in ('axis_linear', 'axis_angular', 'deadman_button', 'arm_button', 'disarm_button'):
+        assert isinstance(gamepad[name], int), name
+
+
+def _rviz_topics(layout):
+    data = yaml.safe_load((ROOT / f'src/g1_navigation/rviz/{layout}.rviz').read_text())
+    manager = data['Visualization Manager']
+    topics = set()
+
+    def walk(displays):
+        for display in displays:
+            topic = display.get('Topic')
+            if isinstance(topic, dict):
+                topics.add(topic['Value'])
+            walk(display.get('Displays', []))
+    walk(manager['Displays'])
+    return data, manager, topics
+
+
+def test_rviz_layouts_reference_topics():
+    text = (ROOT / 'src/g1_navigation/rviz/teleop.rviz').read_text()
+    assert 'Fixed Frame: odom' in text
+    _, manager, topics = _rviz_topics('teleop')
+    assert manager['Global Options']['Fixed Frame'] == 'odom'
+    assert {'/mapping/map_cloud', '/perception/obstacles', '/approach_zone',
+            '/stop_zone', '/g1/status_marker'} <= topics
+    _, manager, topics = _rviz_topics('navigation')
+    assert manager['Global Options']['Fixed Frame'] == 'map'
+    assert {'/map', '/plan', '/local_costmap/costmap', '/approach_zone', '/stop_zone',
+            '/perception/obstacles', '/g1/status_marker'} <= topics
+    tools = {tool['Class'] for tool in manager['Tools']}
+    assert {'rviz_default_plugins/SetInitialPose', 'rviz_default_plugins/SetGoal'} <= tools

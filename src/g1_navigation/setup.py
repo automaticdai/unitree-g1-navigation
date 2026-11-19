@@ -9,6 +9,7 @@ setup(
         ('share/g1_navigation/launch', glob('launch/*.launch.py')),
         ('share/g1_navigation/config', glob('config/*')),
         ('share/g1_navigation/behavior_trees', glob('behavior_trees/*.xml')),
+        ('share/g1_navigation/rviz', glob('rviz/*.rviz')),
     ],
     install_requires=['setuptools', 'numpy', 'scipy', 'PyYAML'],
     entry_points={'console_scripts': [
@@ -17,5 +18,6 @@ setup(
         'localizer = g1_navigation.localizer:main',
         'command_bridge = g1_navigation.command_bridge:main',
         'gamepad_teleop = g1_navigation.gamepad_teleop:main',
+        'footprint_publisher = g1_navigation.footprint_publisher:main',
     ]},
 )

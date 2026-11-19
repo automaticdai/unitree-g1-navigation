@@ -159,24 +159,55 @@ def test_ros_navigation_bridge_rejects_reverse_config():
         CommandBridge()
 
 
-def test_mapping_launch_has_no_velocity_or_navigation_nodes(tmp_path):
+def _build_launch(**overrides):
     import importlib.util
     from pathlib import Path
     from launch import LaunchContext
-    from launch_ros.actions import Node as LaunchNode
     path = Path(__file__).resolve().parents[1] / 'src/g1_navigation/launch/bringup.launch.py'
     spec = importlib.util.spec_from_file_location('g1_bringup', path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     context = LaunchContext()
+    config = path.parent.parent / 'config'
     context.launch_configurations.update(dict(
         mode='mapping', replay='false', enable_hardware='false', start_sensors='false',
-        robot_config=str(path.parent.parent / 'config/robot.yaml'),
-        fastlio_config=str(path.parent.parent / 'config/fastlio.yaml'),
-        session_directory=str(tmp_path / 'new_map'), map_directory='', record_bag='false'))
-    actions = module.build(context)
-    executables = [action.node_executable for action in actions if isinstance(action, LaunchNode)]
-    assert executables == ['sensor_adapter', 'map_recorder']
+        robot_config=str(config / 'robot.yaml'), fastlio_config=str(config / 'fastlio.yaml'),
+        teleop_config=str(config / 'teleop.yaml'),
+        session_directory='', map_directory='', record_bag='false'))
+    context.launch_configurations.update(overrides)
+    return module.build(context)
+
+
+def _executables(actions):
+    from launch_ros.actions import Node as LaunchNode
+    return [action.node_executable for action in actions if isinstance(action, LaunchNode)]
+
+
+def test_mapping_launch_has_no_velocity_or_navigation_nodes(tmp_path):
+    actions = _build_launch(mode='mapping', session_directory=str(tmp_path / 'new_map'))
+    assert _executables(actions) == ['sensor_adapter', 'map_recorder']
+
+
+def test_teleop_launch_graph(tmp_path):
+    from launch.actions import IncludeLaunchDescription
+    actions = _build_launch(mode='teleop')
+    assert _executables(actions) == ['sensor_adapter', 'map_recorder', 'footprint_publisher',
+                                     'collision_monitor', 'lifecycle_manager', 'gamepad_teleop',
+                                     'command_bridge']
+    assert not any(isinstance(action, IncludeLaunchDescription) for action in actions)
+    assert _executables(_build_launch(mode='teleop', session_directory=str(tmp_path / 'new'))) == \
+        _executables(actions)
+    for bad in ('relative/dir', str(tmp_path)):
+        with pytest.raises(ValueError):
+            _build_launch(mode='teleop', session_directory=bad)
+
+
+def test_teleop_hardware_replay_rejected(tmp_path):
+    with pytest.raises(ValueError):
+        _build_launch(mode='teleop', replay='true', enable_hardware='true')
+    with pytest.raises(ValueError):
+        _build_launch(mode='mapping', enable_hardware='true', session_directory=str(tmp_path / 'm'))
+    _build_launch(mode='teleop', enable_hardware='true')
 
 
 def test_ros_localizer_loads_map_and_waits_for_initial_pose(tmp_path):
@@ -213,3 +244,24 @@ def test_ros_gamepad_teleop_wires_joy_to_command():
         assert node.last_command[0] > 0
     finally:
         node.destroy_node()
+
+
+def test_ros_footprint_publisher_publishes_rectangle_in_base_frame():
+    from g1_navigation.footprint_publisher import FootprintPublisher
+    points = [0.4, 0.45, 0.4, -0.45, -0.4, -0.45, -0.4, 0.45]
+    rclpy.init(args=['--ros-args', '-p', f'points:={points}'])
+    node = FootprintPublisher()
+    try:
+        msg = node.message()
+        assert msg.header.frame_id == 'base_footprint'
+        assert [round(v, 6) for p in msg.polygon.points for v in (p.x, p.y)] == points
+        assert node.publisher.topic_name == '/teleop/footprint'
+    finally:
+        node.destroy_node()
+
+
+def test_ros_footprint_publisher_rejects_bad_polygon():
+    rclpy.init(args=['--ros-args', '-p', 'points:=[0.4, 0.45, 0.4]'])
+    from g1_navigation.footprint_publisher import FootprintPublisher
+    with pytest.raises(ValueError):
+        FootprintPublisher()

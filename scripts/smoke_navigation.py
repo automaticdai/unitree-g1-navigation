@@ -16,7 +16,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
-from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
+from geometry_msgs.msg import PolygonStamped, PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
 from lifecycle_msgs.srv import GetState
@@ -27,6 +27,12 @@ import yaml
 from ament_index_python.packages import get_package_share_directory
 from g1_navigation.map_io import save_bundle
 from g1_navigation.ros_helpers import cloud
+
+
+def padded_extent(nav2_overrides):
+    from g1_navigation.configuration import padded_footprint
+    points = padded_footprint(nav2_overrides)
+    return max(abs(x) for x in points[0::2]), max(abs(y) for y in points[1::2])
 
 
 def main():
@@ -78,6 +84,11 @@ def main():
                                          for s in msg.status)), 10)
             node.create_subscription(Twist, '/g1/command_preview', command, 10)
             node.create_subscription(String, '/g1/autonomy_status', lambda msg: state.update(status=msg.data), 10)
+            # The approach polygon's shape comes only from the costmap footprint topic (Humble 1.1.20).
+            approach_extent = padded_extent(yaml.safe_load((share / 'config/nav2_overrides.yaml').read_text()))
+            node.create_subscription(PolygonStamped, '/approach_zone', lambda msg: state.update(approach=(
+                max((abs(p.x) for p in msg.polygon.points), default=0.),
+                max((abs(p.y) for p in msg.polygon.points), default=0.))), 10)
             arm = node.create_client(SetBool, '/g1/arm')
             lifecycle = node.create_client(GetState, '/bt_navigator/get_state')
             navigator = ActionClient(node, NavigateToPose, '/navigate_to_pose')
@@ -132,7 +143,10 @@ def main():
                     if loss_at is not None and now - loss_at > 1.5:
                         if not state['stopped'] or not state['status'].startswith('DISARMED'):
                             raise RuntimeError(f'Data loss failed to stop command gate: {state}')
-                        print('PASS: Nav2 produced a guarded command; sensor loss latched disarmed with zero output.')
+                        if not np.allclose(state.get('approach', (0., 0.)), approach_extent, atol=1e-3):
+                            raise RuntimeError(f'Approach polygon not fed by costmap footprint: {state}')
+                        print('PASS: Nav2 produced a guarded command; sensor loss latched disarmed with zero output; '
+                              f'approach polygon follows the padded footprint {approach_extent}.')
                         return
                     rclpy.spin_once(node, timeout_sec=0.01)
                 raise RuntimeError(f'Graph smoke test timed out: {state}')
