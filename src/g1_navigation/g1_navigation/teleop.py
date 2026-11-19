@@ -84,6 +84,7 @@ class Gamepad:
 
     def _rescale(self, value):
         dz = self.config.deadzone
+        value = max(-1.0, min(1.0, value))
         if abs(value) < dz:
             return 0.0
         return math.copysign((abs(value) - dz) / (1 - dz), value)

@@ -129,3 +129,16 @@ def test_invalid_sample_does_not_update_edge_state():
 def test_bad_config_rejected(kwargs):
     with pytest.raises(ValueError):
         GamepadConfig(**kwargs)
+
+
+def test_out_of_range_axes_are_clamped_to_limits():
+    g = Gamepad()
+    for t in (0., 1., 2.):
+        g.update(*joy(lin=5., ang=5., deadman=1), t)
+        out = g.command(t)
+    assert out == pytest.approx((0.2, 0.3))
+    g2 = Gamepad()
+    for t in (0., 1., 2.):
+        g2.update(*joy(lin=-5., ang=-5., deadman=1), t)
+        out = g2.command(t)
+    assert out == pytest.approx((-0.1, -0.3))
