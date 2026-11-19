@@ -117,3 +117,26 @@ def test_ros_localizer_loads_map_and_waits_for_initial_pose(tmp_path):
         assert node.accepted == 0
     finally:
         node.destroy_node()
+
+
+def test_ros_gamepad_teleop_wires_joy_to_command():
+    import time
+    from sensor_msgs.msg import Joy
+    from g1_navigation.gamepad_teleop import GamepadTeleop
+    rclpy.init()
+    node = GamepadTeleop()
+    try:
+        node.tick(0.)
+        assert node.last_command == (0., 0.)
+        assert not node.gamepad.healthy(0.)
+        msg = Joy(axes=[0.] * 8, buttons=[0] * 11)
+        msg.buttons[4] = 1
+        msg.axes[1] = 1.0
+        node.joy(msg)
+        node.tick()
+        time.sleep(0.1)
+        node.joy(msg)
+        node.tick()
+        assert node.last_command[0] > 0
+    finally:
+        node.destroy_node()

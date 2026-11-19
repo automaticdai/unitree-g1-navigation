@@ -16,5 +16,6 @@ setup(
         'map_recorder = g1_navigation.map_recorder:main',
         'localizer = g1_navigation.localizer:main',
         'command_bridge = g1_navigation.command_bridge:main',
+        'gamepad_teleop = g1_navigation.gamepad_teleop:main',
     ]},
 )
