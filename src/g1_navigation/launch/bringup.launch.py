@@ -80,9 +80,11 @@ def build(context):
         if arg('record_bag') == 'true':
             # Teleop without a session directory still records, beside a timestamped name.
             output = session + '_bag' if session else time.strftime('teleop_%Y%m%d_%H%M%S_bag')
+            # Record the raw inputs FAST-LIO reads so the session can be replayed.
+            raw = (['/g1/lidar/points', '/g1/lidar/imu'] if source == 'utlidar'
+                   else ['/livox/lidar', '/livox/imu'])
             actions.append(ExecuteProcess(cmd=[
-                'ros2', 'bag', 'record', '-o', output,
-                '/livox/lidar', '/livox/imu', '/Odometry', '/cloud_registered_body',
+                'ros2', 'bag', 'record', '-o', output, *raw, '/Odometry', '/cloud_registered_body',
                 '/odom', '/tf', '/tf_static', '/health/perception'], output='screen'))
         return actions
     actions.append(Node(package='g1_navigation', executable='localizer', output='screen',

@@ -31,8 +31,10 @@ Unitree remote.
    and single in the map while walking and turning.
 3. **Obstacle response test** with a person/box 0.6-1 m ahead in the dry run
    (approach slowdown and freeze were not exercised live yet).
-4. README: document `sensor_source:=utlidar`, `robot_g1_head.yaml`, the
-   camera preview and obstacle memory.
+4. ~~README: document `sensor_source:=utlidar`, `robot_g1_head.yaml`, the
+   camera preview and obstacle memory.~~ Done. Bags recorded with
+   `sensor_source:=utlidar` now include `/g1/lidar/*` (previously only the
+   unused `/livox/*` raw topics, so those sessions could not be replayed).
 
 ## Stage B prerequisites (SDK velocity commands; needs explicit go-ahead)
 
