@@ -178,7 +178,7 @@ and approach polygons, and a text marker with the gate state and output.
 | --- | --- |
 | LT, left trigger (hold past halfway) | Deadman: no motion unless held; releasing it stops immediately |
 | Left stick up/down | Forward up to 0.2 m/s, reverse up to 0.1 m/s |
-| Left stick left/right | Turn up to 0.3 rad/s |
+| Right stick left/right | Turn up to 0.3 rad/s |
 | Start (☰), with LT held and sticks neutral | Arm (one request per press; never re-arms automatically) |
 | Back (⧉) | Disarm |
 

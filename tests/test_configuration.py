@@ -105,6 +105,8 @@ def test_teleop_config_limits():
     assert isinstance(gamepad['deadman_threshold'], float)
     # Left trigger (Xbox via joy_node: +1 released, -1 pressed) is the deadman.
     assert gamepad['deadman_axis'] == 2 and -1. < gamepad['deadman_threshold'] < 0.
+    # Left stick vertical drives, right stick horizontal turns.
+    assert gamepad['axis_linear'] == 1 and gamepad['axis_angular'] == 3
 
 
 def _rviz_topics(layout):

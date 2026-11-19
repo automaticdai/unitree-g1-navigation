@@ -7,7 +7,7 @@ from typing import Sequence
 @dataclass(frozen=True)
 class GamepadConfig:
     axis_linear: int = 1        # left stick vertical (Xbox layout via joy)
-    axis_angular: int = 0       # left stick horizontal
+    axis_angular: int = 3       # right stick horizontal
     # Deadman: an analog axis held past deadman_threshold (default: left trigger, which
     # joy_node reports as +1 released .. -1 fully pressed), or deadman_button when
     # deadman_axis is -1. Pressed means axis <= threshold, so a trigger reading 0
