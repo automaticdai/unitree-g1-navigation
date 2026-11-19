@@ -36,6 +36,18 @@ Unitree remote.
    `sensor_source:=utlidar` now include `/g1/lidar/*` (previously only the
    unused `/livox/*` raw topics, so those sessions could not be replayed).
 
+## Found in simulation (sim/, 2026-11-19), to confirm on the robot
+
+- Approach-stop ends at the close-contact freeze boundary: sway decides whether
+  reverse is still allowed (one run reversed, one froze). Consider a larger
+  approach footprint than the freeze zone.
+- Head-height ghosts above the Mid360's upper FOV edge (~+7 deg) cannot be seen
+  through and are held for `obstacle_memory_max_age`; a passing person can block
+  forward driving for up to 30 s.
+- ~2.5 deg attitude change vs the calibration pose lifts floor returns 2-4 m away
+  over `obstacle_min_height`. Check standing and walking with
+  `sim/tools/floor_fit.py /mapping/points` during item 2.
+
 ## Stage B prerequisites (SDK velocity commands; needs explicit go-ahead)
 
 - Verified walking-controller FSM IDs for `allowed_fsm_ids`.
