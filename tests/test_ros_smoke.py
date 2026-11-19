@@ -173,7 +173,8 @@ def _build_launch(**overrides):
         mode='mapping', replay='false', enable_hardware='false', start_sensors='false',
         robot_config=str(config / 'robot.yaml'), fastlio_config=str(config / 'fastlio.yaml'),
         teleop_config=str(config / 'teleop.yaml'),
-        session_directory='', map_directory='', record_bag='false'))
+        session_directory='', map_directory='', record_bag='false',
+        sensor_source='livox', source_domain_id='0', livox_config=''))
     context.launch_configurations.update(overrides)
     return module.build(context)
 
@@ -200,6 +201,21 @@ def test_teleop_launch_graph(tmp_path):
     for bad in ('relative/dir', str(tmp_path)):
         with pytest.raises(ValueError):
             _build_launch(mode='teleop', session_directory=bad)
+
+
+def test_utlidar_source_relays_instead_of_driving_the_sensor():
+    actions = _build_launch(mode='teleop', start_sensors='true', sensor_source='utlidar', fastlio_config='')
+    nodes = _executables(actions)
+    assert nodes[:3] == ['utlidar_relay', 'fastlio_mapping', 'sensor_adapter']
+    assert 'livox_ros_driver2_node' not in nodes
+    from launch_ros.actions import Node as LaunchNode
+    fastlio = next(a for a in actions if isinstance(a, LaunchNode) and a.node_executable == 'fastlio_mapping')
+    from launch_ros.parameter_descriptions import ParameterFile
+    files = [p.param_file[0].text for p in fastlio._Node__parameters if isinstance(p, ParameterFile)]
+    assert len(files) == 1 and files[0].endswith('fastlio_g1.yaml'), files
+    # The Livox source still requires its driver JSON.
+    with pytest.raises(ValueError):
+        _build_launch(mode='teleop', start_sensors='true', sensor_source='livox')
 
 
 def test_teleop_hardware_replay_rejected(tmp_path):
@@ -265,3 +281,50 @@ def test_ros_footprint_publisher_rejects_bad_polygon():
     from g1_navigation.footprint_publisher import FootprintPublisher
     with pytest.raises(ValueError):
         FootprintPublisher()
+
+
+def test_ros_utlidar_relay_restamps_across_domains():
+    import os
+    import time
+    from rclpy.context import Context
+    from rclpy.node import Node
+    from rclpy.qos import qos_profile_sensor_data
+    from sensor_msgs.msg import Imu, PointCloud2
+    from g1_navigation.utlidar_relay import UtlidarRelay
+    own = int(os.environ.get('ROS_DOMAIN_ID', '0'))
+    source_domain = (own + 37) % 100  # stand-in for the robot's domain 0
+    rclpy.init(args=['--ros-args', '-p', f'source_domain_id:={source_domain}'])
+    robot_context = Context()
+    rclpy.init(context=robot_context, domain_id=source_domain)
+    relay = UtlidarRelay()
+    robot = Node('fake_unitree', context=robot_context)
+    listener = Node('relay_listener')
+    received = {'imu': [], 'cloud': []}
+    listener.create_subscription(Imu, '/g1/lidar/imu', received['imu'].append, qos_profile_sensor_data)
+    listener.create_subscription(PointCloud2, '/g1/lidar/points', received['cloud'].append, qos_profile_sensor_data)
+    imu_pub = robot.create_publisher(Imu, '/utlidar/imu_livox_mid360', 10)
+    cloud_pub = robot.create_publisher(PointCloud2, '/utlidar/cloud_livox_mid360', 10)
+    try:
+        lag = 1617.0  # the robot's clock runs this far behind
+        deadline = time.monotonic() + 10.
+        while time.monotonic() < deadline and not (received['imu'] and received['cloud']):
+            stamp = time.time() - lag
+            msg = Imu()
+            msg.header.stamp.sec, msg.header.stamp.nanosec = int(stamp), int((stamp % 1) * 1e9)
+            msg.linear_acceleration.z = -1.0  # g
+            imu_pub.publish(msg)
+            scan = cloud(np.ones((40, 3)), 'livox_frame', msg.header.stamp)
+            cloud_pub.publish(scan)
+            rclpy.spin_once(listener, timeout_sec=0.05)
+        assert received['imu'] and received['cloud'], 'relay did not cross domains'
+        imu = received['imu'][-1]
+        age = time.time() - (imu.header.stamp.sec + imu.header.stamp.nanosec * 1e-9)
+        assert 0. <= age < 0.5, age
+        assert imu.linear_acceleration.z == pytest.approx(-9.80665)
+        assert abs(relay.clock_offset.offset - lag) < 0.5
+    finally:
+        relay.destroy_node()
+        robot.destroy_node()
+        listener.destroy_node()
+        if robot_context.ok():
+            rclpy.shutdown(context=robot_context)

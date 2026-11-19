@@ -24,7 +24,11 @@ def build(context):
     if hardware and (mode not in ('navigation', 'teleop') or replay):
         raise ValueError('Hardware commands require live navigation or teleop mode')
     share = Path(get_package_share_directory('g1_navigation'))
-    robot_config, fastlio_config = arg('robot_config'), arg('fastlio_config')
+    source = arg('sensor_source')
+    robot_config = arg('robot_config')
+    # Unitree's /utlidar stream is a PointCloud2 with per-point time, not Livox CustomMsg.
+    fastlio_config = arg('fastlio_config') or str(
+        share / ('config/fastlio_g1.yaml' if source == 'utlidar' else 'config/fastlio.yaml'))
     session, map_directory = arg('session_directory'), arg('map_directory')
     if mode == 'mapping' and (not Path(session).is_absolute() or Path(session).exists()):
         raise ValueError('Mapping requires a new absolute session_directory')
@@ -36,7 +40,11 @@ def build(context):
     actions = []
     common = [robot_config, {'use_sim_time': replay}]
     start_sensors = arg('start_sensors') == 'true'
-    if not replay and start_sensors:
+    if not replay and start_sensors and source == 'utlidar':
+        # Listen to Unitree's onboard Mid360 topics; never reconfigure the sensor.
+        actions.append(Node(package='g1_navigation', executable='utlidar_relay', output='screen',
+                            parameters=[{'source_domain_id': int(arg('source_domain_id'))}]))
+    if not replay and start_sensors and source == 'livox':
         config = Path(arg('livox_config'))
         if not config.is_file():
             raise ValueError('livox_config must be a Mid360 driver JSON with your sensor and host IPs')
@@ -131,7 +139,13 @@ def generate_launch_description():
         DeclareLaunchArgument('start_sensors', default_value='true', choices=['true', 'false'],
                               description='Start driver/FAST-LIO; false requires externally supplied FAST-LIO topics'),
         DeclareLaunchArgument('robot_config', default_value=str(share / 'config/robot.yaml')),
-        DeclareLaunchArgument('fastlio_config', default_value=str(share / 'config/fastlio.yaml')),
+        DeclareLaunchArgument('sensor_source', default_value='livox', choices=['livox', 'utlidar'],
+                              description='livox: run livox_ros_driver2; utlidar: relay the G1 onboard '
+                                          'Mid360 topics (/utlidar/*) without touching the sensor'),
+        DeclareLaunchArgument('source_domain_id', default_value='0',
+                              description='DDS domain of the Unitree /utlidar topics (utlidar source)'),
+        DeclareLaunchArgument('fastlio_config', default_value='',
+                              description='Empty selects fastlio.yaml (livox) or fastlio_g1.yaml (utlidar)'),
         DeclareLaunchArgument('teleop_config', default_value=str(share / 'config/teleop.yaml')),
         DeclareLaunchArgument('livox_config', default_value=''),
         DeclareLaunchArgument('session_directory', default_value=''),

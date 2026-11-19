@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
-from g1_navigation.geometry import transform, apply, planar, relative_velocity
+from g1_navigation.geometry import transform, apply, planar, relative_velocity, initial_alignment
 from g1_navigation.registration import register, map_tree
 
 
@@ -13,6 +13,26 @@ def test_mount_rotation_and_translation_are_composed_not_renamed():
     flat = planar(base)
     np.testing.assert_allclose(flat @ (np.linalg.inv(flat) @ base) @ mount, imu, atol=1e-12)
     assert flat[2, 3] == 0.
+
+
+def test_initial_alignment_handles_rotated_mount():
+    # G1 head Mid360: upside down (roll pi) and pitched; FAST-LIO's camera_init is the
+    # IMU's own frame at start-up, so the world needs the full mount rotation.
+    mount = transform([0.05, 0., 1.2], Rotation.from_euler('xyz', [np.pi, 0.4, 0.]).as_quat())
+    align = initial_alignment(mount, 1.25)
+    # At start-up (identity FAST-LIO pose) the base is level at the floor origin.
+    base = align @ np.eye(4) @ np.linalg.inv(mount)
+    np.testing.assert_allclose(base[:3, :3], np.eye(3), atol=1e-12)
+    np.testing.assert_allclose(base[:3, 3], [0., 0., 0.05], atol=1e-12)
+    # A floor point 2 m ahead of the base, expressed in the IMU frame, lands on z = 0.
+    floor_in_imu = apply(np.linalg.inv(align), [[2., 0., 0.]])
+    np.testing.assert_allclose(apply(align, floor_in_imu), [[2., 0., 0.]], atol=1e-12)
+    # Later FAST-LIO motion (1 m forward in the base frame) maps to world motion.
+    step = np.linalg.inv(mount) @ transform([1., 0., 0.]) @ mount  # camera_init-frame motion of the IMU
+    moved = align @ step @ np.linalg.inv(mount)
+    np.testing.assert_allclose(moved[:3, 3], [1., 0., 0.05], atol=1e-12)
+    with pytest.raises(ValueError):
+        initial_alignment(mount, 0.)
 
 
 def test_velocity_is_in_child_frame_and_yaw_wrap_is_short():

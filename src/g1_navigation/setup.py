@@ -19,5 +19,6 @@ setup(
         'command_bridge = g1_navigation.command_bridge:main',
         'gamepad_teleop = g1_navigation.gamepad_teleop:main',
         'footprint_publisher = g1_navigation.footprint_publisher:main',
+        'utlidar_relay = g1_navigation.utlidar_relay:main',
     ]},
 )

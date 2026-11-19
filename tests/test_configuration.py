@@ -135,3 +135,19 @@ def test_rviz_layouts_reference_topics():
             '/perception/obstacles', '/g1/status_marker'} <= topics
     tools = {tool['Class'] for tool in manager['Tools']}
     assert {'rviz_default_plugins/SetInitialPose', 'rviz_default_plugins/SetGoal'} <= tools
+
+
+def test_g1_head_mount_matches_measured_up_vector():
+    import numpy as np
+    from g1_navigation.geometry import transform
+    head = yaml.safe_load((CONFIG / 'robot_g1_head.yaml').read_text())['/**']['ros__parameters']
+    base = yaml.safe_load((CONFIG / 'robot.yaml').read_text())['/**']['ros__parameters']
+    assert set(head) == set(base) and not head['calibration_confirmed']
+    for key in set(base) - {'base_to_imu_xyz', 'base_to_imu_xyzw', 'initial_imu_height'}:
+        assert head[key] == base[key], key
+    mount = transform(head['base_to_imu_xyz'], head['base_to_imu_xyzw'])
+    up = np.array([-0.0039, 0.0565, -0.9984])
+    assert mount[:3, :3] @ (up / np.linalg.norm(up)) == pytest.approx([0, 0, 1], abs=2e-3)
+    forward = mount[:3, :3] @ [1., 0., 0.]
+    assert np.degrees(np.arctan2(forward[1], forward[0])) == pytest.approx(0., abs=1.)
+    assert head['base_to_imu_xyz'][2] == head['initial_imu_height'] == 1.259

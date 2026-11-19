@@ -8,7 +8,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2
 from diagnostic_msgs.msg import DiagnosticArray
 from tf2_ros import TransformBroadcaster
-from .geometry import apply, transform, planar, relative_velocity
+from .geometry import apply, initial_alignment, transform, planar, relative_velocity
 from .ros_helpers import parameter, matrix_from_pose, fill_pose, seconds, cloud, xyz, health, tf_message, spin
 
 
@@ -29,6 +29,8 @@ class SensorAdapter(Node):
                 or np.any(self.lower >= self.upper) or self.floor_offset <= 0
                 or not 0 <= self.min_z < self.max_z or self.max_range <= 0):
             raise ValueError('Invalid floor, self-filter, obstacle height, or range configuration')
+        # camera_init -> odom: handles tilted and upside-down mounts (G1 head Mid360).
+        self.align = initial_alignment(self.mount, self.floor_offset)
         self.previous = None
         self.tf = TransformBroadcaster(self)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
@@ -47,8 +49,7 @@ class SensorAdapter(Node):
         try:
             if odom.header.frame_id != 'camera_init' or odom.child_frame_id != 'body' or scan.header.frame_id != 'body':
                 raise ValueError('Unexpected FAST-LIO frames; expected camera_init -> body')
-            imu = matrix_from_pose(odom.pose.pose)
-            imu[2, 3] += self.floor_offset
+            imu = self.align @ matrix_from_pose(odom.pose.pose)
             base = imu @ np.linalg.inv(self.mount)
             flat = planar(base)
             points = xyz(scan)
