@@ -8,7 +8,13 @@ from typing import Sequence
 class GamepadConfig:
     axis_linear: int = 1        # left stick vertical (Xbox layout via joy)
     axis_angular: int = 0       # left stick horizontal
-    deadman_button: int = 4     # LB
+    # Deadman: an analog axis held past deadman_threshold (default: left trigger, which
+    # joy_node reports as +1 released .. -1 fully pressed), or deadman_button when
+    # deadman_axis is -1. Pressed means axis <= threshold, so a trigger reading 0
+    # before its first touch counts as released.
+    deadman_axis: int = 2       # LT
+    deadman_threshold: float = -0.5
+    deadman_button: int = 4     # LB, used only when deadman_axis == -1
     arm_button: int = 7         # Start
     disarm_button: int = 6      # Back
     deadzone: float = 0.1
@@ -24,6 +30,11 @@ class GamepadConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
                 raise ValueError(f'{name} must be an integer >= 0')
+        if isinstance(self.deadman_axis, bool) or not isinstance(self.deadman_axis, int) \
+                or self.deadman_axis < -1:
+            raise ValueError('deadman_axis must be an integer >= -1')
+        if not math.isfinite(self.deadman_threshold) or not -1 < self.deadman_threshold < 1:
+            raise ValueError('deadman_threshold must be in (-1, 1)')
         for name in ('deadzone', 'max_vx', 'max_vx_reverse', 'max_wz',
                      'accel_vx', 'accel_wz', 'joy_timeout'):
             value = getattr(self, name)
@@ -54,11 +65,13 @@ class Gamepad:
     def update(self, axes: Sequence[float], buttons: Sequence[int], now: float) -> list:
         """Record a /joy sample; return events, each 'arm' or 'disarm'."""
         c = self.config
-        valid = (len(axes) > max(c.axis_linear, c.axis_angular)
-                 and len(buttons) > max(c.deadman_button, c.arm_button, c.disarm_button))
+        use_axis = c.deadman_axis >= 0
+        valid = (len(axes) > max(c.axis_linear, c.axis_angular, c.deadman_axis)
+                 and len(buttons) > max(c.arm_button, c.disarm_button, -1 if use_axis else c.deadman_button))
         if valid:
             lin, ang = axes[c.axis_linear], axes[c.axis_angular]
-            valid = math.isfinite(lin) and math.isfinite(ang)
+            trigger = axes[c.deadman_axis] if use_axis else 0.0
+            valid = all(math.isfinite(v) for v in (lin, ang, trigger))
         if not valid:
             # Unhealthy immediately; edge state and last-valid time untouched.
             self._valid = False
@@ -66,7 +79,7 @@ class Gamepad:
         self._valid = True
         self._last_valid = now
         self._lin, self._ang = float(lin), float(ang)
-        self._deadman = bool(buttons[c.deadman_button])
+        self._deadman = trigger <= c.deadman_threshold if use_axis else bool(buttons[c.deadman_button])
         arm = bool(buttons[c.arm_button])
         disarm = bool(buttons[c.disarm_button])
         events = []

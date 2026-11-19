@@ -234,7 +234,7 @@ def test_ros_gamepad_teleop_wires_joy_to_command():
         assert node.last_command == (0., 0.)
         assert not node.gamepad.healthy(0.)
         msg = Joy(axes=[0.] * 8, buttons=[0] * 11)
-        msg.buttons[4] = 1
+        msg.axes[2] = -1.0  # Left trigger fully pressed (deadman).
         msg.axes[1] = 1.0
         node.joy(msg)
         node.tick()

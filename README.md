@@ -176,16 +176,17 @@ and approach polygons, and a text marker with the gate state and output.
 
 | Control (Xbox layout) | Action |
 | --- | --- |
-| LB (hold) | Deadman: no motion unless held; releasing it stops immediately |
+| LT, left trigger (hold past halfway) | Deadman: no motion unless held; releasing it stops immediately |
 | Left stick up/down | Forward up to 0.2 m/s, reverse up to 0.1 m/s |
 | Left stick left/right | Turn up to 0.3 rad/s |
-| Start, with LB held and sticks neutral | Arm (one request per press; never re-arms automatically) |
-| Back | Disarm |
+| Start (☰), with LT held and sticks neutral | Arm (one request per press; never re-arms automatically) |
+| Back (⧉) | Disarm |
 
 Speed increases are ramped; decreases and stops are immediate, and a stick
-reversal passes through zero. Releasing LB keeps the gate armed with zero
+reversal passes through zero. Releasing LT keeps the gate armed with zero
 output. If `/joy` stops for 0.25 s (gamepad unplugged, PC or link lost), the
 operator health fails and the gate disarms; re-arm with Start.
+To use LB as the deadman instead, set `deadman_axis: -1` in `teleop.yaml`.
 
 Obstacle avoidance uses Nav2's **approach** model: the padded footprint is
 simulated along the command and speed is reduced to keep 1.2 s before contact,

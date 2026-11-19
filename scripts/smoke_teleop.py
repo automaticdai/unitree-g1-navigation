@@ -28,7 +28,7 @@ from g1_navigation.configuration import padded_footprint
 from g1_navigation.ros_helpers import cloud
 
 # Must match config/teleop.yaml.
-AXIS_LINEAR, DEADMAN, ARM, MAX_VX, MAX_VX_REVERSE = 1, 4, 7, 0.2, 0.1
+AXIS_LINEAR, DEADMAN_AXIS, ARM, MAX_VX, MAX_VX_REVERSE = 1, 2, 7, 0.2, 0.1
 
 
 def scene(wall_x):
@@ -81,7 +81,9 @@ class Probe(Node):
             msg.axes = [0.] * 8
             msg.buttons = [0] * 11
             msg.axes[AXIS_LINEAR] = float(self.joy['lin'])
-            msg.buttons[DEADMAN], msg.buttons[ARM] = self.joy['deadman'], self.joy['arm']
+            # Left trigger: +1 released, -1 fully pressed.
+            msg.axes[DEADMAN_AXIS] = -1. if self.joy['deadman'] else 1.
+            msg.buttons[ARM] = self.joy['arm']
             self.joy_pub.publish(msg)
 
 

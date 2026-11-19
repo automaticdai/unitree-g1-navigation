@@ -1,6 +1,9 @@
 # Teleop-mode overrides, layered after robot.yaml. Gamepad limits match robot.yaml.
 gamepad_teleop:
-  ros__parameters: {axis_linear: 1, axis_angular: 0, deadman_button: 4, arm_button: 7,
+  # Deadman: hold the left trigger (axis 2: +1 released, -1 pressed) past -0.5.
+  # Set deadman_axis: -1 to use deadman_button (4 = LB) instead.
+  ros__parameters: {axis_linear: 1, axis_angular: 0, deadman_axis: 2, deadman_threshold: -0.5,
+                    deadman_button: 4, arm_button: 7,
                     disarm_button: 6, deadzone: 0.1, max_vx: 0.2, max_vx_reverse: 0.1,
                     max_wz: 0.3, accel_vx: 0.4, accel_wz: 0.8, joy_timeout: 0.25}
 command_bridge:

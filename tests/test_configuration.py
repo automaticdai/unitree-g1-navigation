@@ -100,8 +100,11 @@ def test_teleop_config_limits():
     assert gamepad['max_vx'] == robot['max_vx'] and gamepad['max_wz'] == robot['max_wz']
     for name in ('deadzone', 'max_vx', 'max_vx_reverse', 'max_wz', 'accel_vx', 'accel_wz', 'joy_timeout'):
         assert isinstance(gamepad[name], float), name
-    for name in ('axis_linear', 'axis_angular', 'deadman_button', 'arm_button', 'disarm_button'):
+    for name in ('axis_linear', 'axis_angular', 'deadman_axis', 'deadman_button', 'arm_button', 'disarm_button'):
         assert isinstance(gamepad[name], int), name
+    assert isinstance(gamepad['deadman_threshold'], float)
+    # Left trigger (Xbox via joy_node: +1 released, -1 pressed) is the deadman.
+    assert gamepad['deadman_axis'] == 2 and -1. < gamepad['deadman_threshold'] < 0.
 
 
 def _rviz_topics(layout):

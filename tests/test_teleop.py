@@ -5,13 +5,15 @@ import pytest
 from g1_navigation.teleop import Gamepad, GamepadConfig
 
 
-def joy(lin=0., ang=0., deadman=0, arm=0, disarm=0):
-    cfg = GamepadConfig()
+def joy(lin=0., ang=0., deadman=0, arm=0, disarm=0, cfg=GamepadConfig()):
     axes = [0.] * 8
     buttons = [0] * 11
     axes[cfg.axis_linear] = lin
     axes[cfg.axis_angular] = ang
-    buttons[cfg.deadman_button] = deadman
+    if cfg.deadman_axis >= 0:
+        axes[cfg.deadman_axis] = -1. if deadman else 1.  # Xbox trigger: +1 released, -1 pressed
+    else:
+        buttons[cfg.deadman_button] = deadman
     buttons[cfg.arm_button] = arm
     buttons[cfg.disarm_button] = disarm
     return axes, buttons
@@ -142,3 +144,52 @@ def test_out_of_range_axes_are_clamped_to_limits():
         g2.update(*joy(lin=-5., ang=-5., deadman=1), t)
         out = g2.command(t)
     assert out == pytest.approx((-0.1, -0.3))
+
+
+def test_default_deadman_is_left_trigger_past_threshold():
+    cfg = GamepadConfig()
+    assert (cfg.deadman_axis, cfg.deadman_threshold) == (2, -0.5)
+    for trigger, moving in ((1., False), (0., False), (-0.4, False), (-0.6, True), (-1., True)):
+        g = Gamepad()
+        axes, buttons = joy(lin=1.)
+        axes[2] = trigger
+        buttons[4] = 1  # LB is ignored while the trigger is the deadman.
+        for t in (0., 0.5, 1.):
+            g.update(axes, buttons, t)
+            out = g.command(t)
+        assert (out[0] > 0) == moving, trigger
+
+
+def test_button_deadman_when_axis_disabled():
+    cfg = GamepadConfig(deadman_axis=-1)
+    g = Gamepad(cfg)
+    for t in (0., 0.5, 1.):
+        g.update(*joy(lin=1., deadman=1, cfg=cfg), t)
+        out = g.command(t)
+    assert out == pytest.approx((0.2, 0.))
+    axes, buttons = joy(lin=1., cfg=cfg)
+    axes[2] = -1.  # Trigger is ignored while LB is the deadman.
+    g.update(axes, buttons, 1.05)
+    assert g.command(1.05) == (0., 0.)
+
+
+def test_nonfinite_or_missing_deadman_axis_is_unhealthy():
+    g = Gamepad()
+    axes, buttons = joy(lin=1., deadman=1)
+    axes[2] = math.nan
+    assert g.update(axes, buttons, 0.) == [] and not g.healthy(0.)
+    assert g.update(axes[:2], buttons, 0.) == [] and not g.healthy(0.)
+
+
+def test_arm_with_trigger_held():
+    g = Gamepad()
+    assert g.update(*joy(arm=1), 0.) == []
+    assert g.update(*joy(deadman=1), 0.05) == []
+    assert g.update(*joy(deadman=1, arm=1), 0.1) == ['arm']
+
+
+@pytest.mark.parametrize('kwargs', [{'deadman_axis': -2}, {'deadman_threshold': 1.}, {'deadman_threshold': -1.},
+                                    {'deadman_threshold': math.nan}])
+def test_bad_deadman_axis_config_rejected(kwargs):
+    with pytest.raises(ValueError):
+        GamepadConfig(**kwargs)
