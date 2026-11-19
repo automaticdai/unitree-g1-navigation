@@ -1,6 +1,6 @@
 import math
 import pytest
-from g1_navigation.safety import CommandGate, Limits
+from g1_navigation.safety import CommandGate, Limits, required_health
 
 
 def healthy(gate, now):
@@ -92,3 +92,44 @@ def test_clock_reversal_stops_and_initial_wait_expires():
 def test_bad_limits_rejected(kwargs):
     with pytest.raises(ValueError):
         Limits(**kwargs)
+
+
+def test_reverse_is_clamped_to_reverse_limit():
+    gate = CommandGate(Limits(max_vx_reverse=0.1))
+    healthy(gate, 0.)
+    gate.arm(0.)
+    gate.receive((-1., 0., 0.), 0.)
+    assert gate.output(0.) == (-0.1, 0., 0.)
+
+
+def test_reverse_disabled_by_default():
+    gate = CommandGate()
+    healthy(gate, 0.)
+    gate.arm(0.)
+    gate.receive((-0.05, 0., 0.), 0.)
+    assert gate.output(0.) == (0., 0., 0.)
+
+
+@pytest.mark.parametrize('profile,hardware,expected', [
+    ('navigation', False, ('perception', 'localization', 'robot', 'operator')),
+    ('navigation', True, ('perception', 'localization', 'robot', 'remote')),
+    ('teleop', False, ('perception', 'robot', 'operator')),
+    ('teleop', True, ('perception', 'robot', 'operator', 'remote'))])
+def test_required_health_per_profile(profile, hardware, expected):
+    assert required_health(profile, hardware) == expected
+
+
+def test_unknown_profile_rejected():
+    with pytest.raises(ValueError):
+        required_health('mapping', False)
+
+
+def test_zero_commands_keep_gate_armed():
+    gate = CommandGate(required=required_health('teleop', False))
+    healthy(gate, 0.)
+    gate.arm(0.)
+    for t in (0.1, 0.2, 0.3):
+        healthy(gate, t)
+        gate.receive((0., 0., 0.), t)
+        assert gate.output(t) == (0., 0., 0.)
+    assert gate.armed

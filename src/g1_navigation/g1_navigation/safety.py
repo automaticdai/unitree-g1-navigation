@@ -7,6 +7,7 @@ import math
 class Limits:
     max_vx: float = 0.2
     max_vy: float = 0.0
+    max_vx_reverse: float = 0.0
     max_wz: float = 0.3
     command_timeout: float = 0.25
     health_timeout: float = 0.5
@@ -18,6 +19,15 @@ class Limits:
             raise ValueError('Limits must be finite and nonnegative')
         if self.command_timeout <= 0 or self.health_timeout <= 0 or self.first_command_timeout <= 0:
             raise ValueError('Timeouts must be positive')
+
+
+def required_health(profile, hardware):
+    """Health inputs the gate requires for an operating profile."""
+    if profile == 'navigation':
+        return ('perception', 'localization', 'robot', 'remote' if hardware else 'operator')
+    if profile == 'teleop':
+        return ('perception', 'robot', 'operator') + (('remote',) if hardware else ())
+    raise ValueError(f'unknown profile: {profile!r}')
 
 
 class CommandGate:
@@ -70,10 +80,10 @@ class CommandGate:
             return
         if not self.armed:
             return
-        # No backwards/lateral walking in the first operating profile.
+        # Reverse is disabled unless max_vx_reverse > 0; lateral unless max_vy > 0.
         vx, vy, wz = command
         l = self.limits
-        self.command = (max(0.0, min(vx, l.max_vx)),
+        self.command = (max(-l.max_vx_reverse, min(vx, l.max_vx)),
                         max(-l.max_vy, min(vy, l.max_vy)),
                         max(-l.max_wz, min(wz, l.max_wz)))
         self.command_at = now
