@@ -2,7 +2,7 @@ import json
 import numpy as np
 import pytest
 import yaml
-from g1_navigation.map_io import VoxelMap, occupancy, save_bundle
+from g1_navigation.map_io import VoxelMap, display_points, occupancy, save_bundle
 
 
 def test_voxel_limit_does_not_partially_update_map():
@@ -41,3 +41,13 @@ def test_huge_grid_and_empty_maps_rejected():
         occupancy([[0., 0., 0.], [1e6, 1e6, 0.]])
     with pytest.raises(ValueError):
         occupancy([])
+
+
+def test_display_points_voxelizes_and_caps():
+    points = np.random.default_rng(0).random((10_000, 3))
+    assert len(display_points(points, resolution=0.1)) <= 1000
+    assert len(display_points(points, resolution=0.1, max_points=50)) <= 50
+    for kwargs in ({'resolution': 0.0}, {'resolution': float('nan')}, {'resolution': -1.0},
+                   {'max_points': 0}):
+        with pytest.raises(ValueError):
+            display_points(points, **kwargs)

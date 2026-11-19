@@ -31,6 +31,22 @@ class VoxelMap:
         return np.asarray(list(self.cells.values()), dtype=float).reshape(-1, 3)
 
 
+def display_points(points, resolution=0.1, max_points=200_000):
+    """Thin a map for live display: one point per voxel, then an even stride cap."""
+    if not np.isfinite(resolution) or resolution <= 0 or max_points <= 0:
+        raise ValueError('Invalid display bounds')
+    points = np.asarray(points, dtype=float).reshape(-1, 3)
+    points = points[np.isfinite(points).all(axis=1)]
+    if not len(points):
+        return points
+    keys = np.floor(points / resolution).astype(np.int64)
+    _, indices = np.unique(keys, axis=0, return_index=True)
+    points = points[np.sort(indices)]
+    if len(points) > max_points:
+        points = points[np.linspace(0, len(points) - 1, max_points).astype(int)]
+    return points
+
+
 def occupancy(points, resolution=0.1, ground_tolerance=0.08,
               obstacle_min=0.10, obstacle_max=1.9, max_cells=16_000_000):
     points = np.asarray(points, float).reshape(-1, 3)

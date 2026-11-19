@@ -1,6 +1,10 @@
-"""One process graph per operating mode. Mapping never starts a command bridge."""
+"""One process graph per operating mode. Mapping never starts a command bridge.
+
+Teleop runs the live-mapping pipeline with the collision monitor, gamepad and a
+teleop-profile bridge, but no Nav2, map server or localizer."""
 from pathlib import Path
 import tempfile
+import time
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -8,7 +12,7 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchD
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from g1_navigation.configuration import merge, set_sim_time
+from g1_navigation.configuration import TELEOP_FOOTPRINT_TOPIC, merge, padded_footprint, set_sim_time
 
 
 def build(context):
@@ -17,20 +21,30 @@ def build(context):
 
     mode = arg('mode')
     replay, hardware = arg('replay') == 'true', arg('enable_hardware') == 'true'
-    if hardware and (mode != 'navigation' or replay):
-        raise ValueError('Hardware commands require live navigation mode')
+    if hardware and (mode not in ('navigation', 'teleop') or replay):
+        raise ValueError('Hardware commands require live navigation or teleop mode')
     share = Path(get_package_share_directory('g1_navigation'))
-    robot_config, fastlio_config = arg('robot_config'), arg('fastlio_config')
+    source = arg('sensor_source')
+    robot_config = arg('robot_config')
+    # Unitree's /utlidar stream is a PointCloud2 with per-point time, not Livox CustomMsg.
+    fastlio_config = arg('fastlio_config') or str(
+        share / ('config/fastlio_g1.yaml' if source == 'utlidar' else 'config/fastlio.yaml'))
     session, map_directory = arg('session_directory'), arg('map_directory')
     if mode == 'mapping' and (not Path(session).is_absolute() or Path(session).exists()):
         raise ValueError('Mapping requires a new absolute session_directory')
-    if mode != 'mapping' and not all((Path(map_directory) / file).is_file()
-                                     for file in ('map.yaml', 'points.npy', 'metadata.json')):
+    if mode == 'teleop' and session and (not Path(session).is_absolute() or Path(session).exists()):
+        raise ValueError('Teleop session_directory must be empty or a new absolute path')
+    if mode not in ('mapping', 'teleop') and not all((Path(map_directory) / file).is_file()
+                                               for file in ('map.yaml', 'points.npy', 'metadata.json')):
         raise ValueError('Provide a complete saved map_directory')
     actions = []
     common = [robot_config, {'use_sim_time': replay}]
     start_sensors = arg('start_sensors') == 'true'
-    if not replay and start_sensors:
+    if not replay and start_sensors and source == 'utlidar':
+        # Listen to Unitree's onboard Mid360 topics; never reconfigure the sensor.
+        actions.append(Node(package='g1_navigation', executable='utlidar_relay', output='screen',
+                            parameters=[{'source_domain_id': int(arg('source_domain_id'))}]))
+    if not replay and start_sensors and source == 'livox':
         config = Path(arg('livox_config'))
         if not config.is_file():
             raise ValueError('livox_config must be a Mid360 driver JSON with your sensor and host IPs')
@@ -46,14 +60,28 @@ def build(context):
              # Raw frames are isolated; sensor_adapter owns the navigation TF tree.
              remappings=[('/tf', '/fastlio/tf'), ('/tf_static', '/fastlio/tf_static')]))
     actions.append(Node(package='g1_navigation', executable='sensor_adapter', output='screen', parameters=common))
-    if mode == 'mapping':
+    if mode in ('mapping', 'teleop'):
         actions.append(Node(package='g1_navigation', executable='map_recorder', output='screen',
                             parameters=common + [{'session_directory': session,
                                                   'robot_config': robot_config,
                                                   'fastlio_config': fastlio_config}]))
+        if mode == 'teleop':
+            teleop_config = arg('teleop_config')
+            overrides = yaml.safe_load((share / 'config/nav2_overrides.yaml').read_text())
+            actions.append(Node(package='g1_navigation', executable='footprint_publisher', output='screen',
+                                parameters=[{'points': padded_footprint(overrides), 'use_sim_time': replay}]))
+            footprint_topic = {'approach_zone.footprint_topic': TELEOP_FOOTPRINT_TOPIC}
+            actions.extend(collision_monitor(share, replay, footprint_topic) + [
+                Node(package='g1_navigation', executable='gamepad_teleop', output='screen',
+                     parameters=common + [teleop_config]),
+                Node(package='g1_navigation', executable='command_bridge', output='screen',
+                     parameters=common + [teleop_config, {'enable_hardware': hardware}]),
+            ])
         if arg('record_bag') == 'true':
+            # Teleop without a session directory still records, beside a timestamped name.
+            output = session + '_bag' if session else time.strftime('teleop_%Y%m%d_%H%M%S_bag')
             actions.append(ExecuteProcess(cmd=[
-                'ros2', 'bag', 'record', '-o', session + '_bag',
+                'ros2', 'bag', 'record', '-o', output,
                 '/livox/lidar', '/livox/imu', '/Odometry', '/cloud_registered_body',
                 '/odom', '/tf', '/tf_static', '/health/perception'], output='screen'))
         return actions
@@ -82,27 +110,43 @@ def build(context):
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(nav_share / 'launch/navigation_launch.py')),
                                  launch_arguments={'params_file': params_file, 'use_sim_time': str(replay).lower(),
                                                    'autostart': 'true', 'use_composition': 'False'}.items()),
-        Node(package='nav2_collision_monitor', executable='collision_monitor', name='collision_monitor',
-             parameters=[str(share / 'config/collision_monitor.yaml'), {'use_sim_time': replay}], output='screen'),
-        Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='collision_lifecycle',
-             parameters=[{'autostart': True, 'node_names': ['collision_monitor'], 'use_sim_time': replay}]),
+    ] + collision_monitor(share, replay) + [
         Node(package='g1_navigation', executable='command_bridge', output='screen',
-             parameters=common + [{'enable_hardware': hardware}]),
+             parameters=common + [{'profile': 'navigation', 'enable_hardware': hardware}]),
     ])
     return actions
+
+
+def collision_monitor(share, replay, overrides=None):
+    """Shared avoidance (config/collision_monitor.yaml) for navigation and teleop."""
+    return [
+        Node(package='nav2_collision_monitor', executable='collision_monitor', name='collision_monitor',
+             parameters=[str(share / 'config/collision_monitor.yaml'),
+                         {'use_sim_time': replay, **(overrides or {})}], output='screen'),
+        Node(package='nav2_lifecycle_manager', executable='lifecycle_manager', name='collision_lifecycle',
+             parameters=[{'autostart': True, 'node_names': ['collision_monitor'], 'use_sim_time': replay}]),
+    ]
 
 
 def generate_launch_description():
     share = Path(get_package_share_directory('g1_navigation'))
     return LaunchDescription([
-        DeclareLaunchArgument('mode', default_value='mapping', choices=['mapping', 'localization', 'navigation']),
+        DeclareLaunchArgument('mode', default_value='mapping',
+                              choices=['mapping', 'localization', 'navigation', 'teleop']),
         DeclareLaunchArgument('replay', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('enable_hardware', default_value='false', choices=['true', 'false']),
         DeclareLaunchArgument('record_bag', default_value='true', choices=['true', 'false']),
         DeclareLaunchArgument('start_sensors', default_value='true', choices=['true', 'false'],
                               description='Start driver/FAST-LIO; false requires externally supplied FAST-LIO topics'),
         DeclareLaunchArgument('robot_config', default_value=str(share / 'config/robot.yaml')),
-        DeclareLaunchArgument('fastlio_config', default_value=str(share / 'config/fastlio.yaml')),
+        DeclareLaunchArgument('sensor_source', default_value='livox', choices=['livox', 'utlidar'],
+                              description='livox: run livox_ros_driver2; utlidar: relay the G1 onboard '
+                                          'Mid360 topics (/utlidar/*) without touching the sensor'),
+        DeclareLaunchArgument('source_domain_id', default_value='0',
+                              description='DDS domain of the Unitree /utlidar topics (utlidar source)'),
+        DeclareLaunchArgument('fastlio_config', default_value='',
+                              description='Empty selects fastlio.yaml (livox) or fastlio_g1.yaml (utlidar)'),
+        DeclareLaunchArgument('teleop_config', default_value=str(share / 'config/teleop.yaml')),
         DeclareLaunchArgument('livox_config', default_value=''),
         DeclareLaunchArgument('session_directory', default_value=''),
         DeclareLaunchArgument('map_directory', default_value=''),

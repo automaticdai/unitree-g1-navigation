@@ -1,0 +1,44 @@
+# FAST-LIO for the G1's head Mid360 as published by Unitree's onboard software
+# (/utlidar/*, relayed and restamped by utlidar_relay). The cloud is in the
+# Mid360 LiDAR frame and the IMU in its internal IMU frame, as with the Livox driver.
+/**:
+  ros__parameters:
+    feature_extract_enable: false
+    point_filter_num: 3
+    max_iteration: 4
+    filter_size_surf: 0.15
+    filter_size_map: 0.2
+    cube_side_length: 200.0
+    runtime_pos_log_enable: false
+    common:
+      lid_topic: /g1/lidar/points
+      imu_topic: /g1/lidar/imu
+      time_sync_en: false
+      time_offset_lidar_to_imu: 0.0
+    preprocess:
+      lidar_type: 2  # PointCloud2 with per-point time/ring (Unitree /utlidar relay)
+      scan_line: 4
+      blind: 0.5
+      timestamp_unit: 3  # per-point time in ns
+      scan_rate: 10
+    mapping:
+      acc_cov: 0.1
+      gyr_cov: 0.1
+      b_acc_cov: 0.0001
+      b_gyr_cov: 0.0001
+      fov_degree: 360.0
+      det_range: 50.0
+      extrinsic_est_en: false
+      # Mid360 LiDAR -> internal IMU; verify against your sensor documentation.
+      extrinsic_T: [-0.011, -0.02329, 0.04412]
+      extrinsic_R: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    publish:
+      path_en: true
+      effect_map_en: false
+      map_en: false
+      scan_publish_en: true
+      dense_publish_en: true
+      scan_bodyframe_pub_en: true
+    pcd_save:
+      pcd_save_en: false
+      interval: -1

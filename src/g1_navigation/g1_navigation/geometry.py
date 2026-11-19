@@ -23,6 +23,20 @@ def planar(matrix):
     return transform((matrix[0, 3], matrix[1, 3], 0.), Rotation.from_euler('z', yaw).as_quat())
 
 
+def initial_alignment(mount, imu_height):
+    """World (odom) pose of FAST-LIO's camera_init frame.
+
+    camera_init is the IMU's own frame at start-up, so with the base level at the
+    floor origin the world sees it at the full mount pose, with the measured IMU
+    height above the floor replacing the nominal mount z.
+    """
+    if not np.isfinite(imu_height) or imu_height <= 0:
+        raise ValueError('IMU height must be positive')
+    align = np.array(mount, float)
+    align[2, 3] = imu_height
+    return align
+
+
 def relative_velocity(previous, current, dt):
     if not 0.001 <= dt <= 0.5:
         raise ValueError('Odometry interval out of bounds')

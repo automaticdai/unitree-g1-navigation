@@ -1,0 +1,38 @@
+/**:
+  ros__parameters:
+    # G1 head Mid360 as published by Unitree's onboard software (sensor_source:=utlidar).
+    # Measured 2026-11-19 on a standing G1, robot walked only with the Unitree remote:
+    # - up vector in the IMU frame (gravity + floor plane, agree to 0.55 deg):
+    #   (-0.0039, 0.0565, -0.9984): mounted upside down, ~3.2 deg tilt.
+    # - forward = IMU +x to ~1 deg (direction of travel over two 4-5 m walks).
+    # - IMU 1.259 m above the floor. Horizontal offset from the base not measured (0).
+    # The head is rigid on the torso, which yaws on the waist joint relative to the
+    # legs; walking keeps the waist near zero. Set true only after an on-site check.
+    calibration_confirmed: false
+    base_to_imu_xyz: [0.0, 0.0, 1.259]
+    base_to_imu_xyzw: [0.9996, 0.00006, -0.00195, 0.02826]
+    initial_imu_height: 1.259
+    # Scans hold no body returns beyond 0.3 m of the sensor (zero-range no-returns are
+    # dropped by FAST-LIO's blind radius); the box guards against raised arms.
+    self_filter_min: [-0.25, -0.35, -0.1]
+    self_filter_max: [0.25, 0.35, 1.8]
+    obstacle_min_height: 0.10
+    obstacle_max_height: 1.9
+    max_range: 15.0
+    # Obstacles persist until a LiDAR beam passes through them (0 = single scans only).
+    obstacle_memory_max_age: 30.0
+    obstacle_memory_radius: 3.0
+    voxel_resolution: 0.08
+    max_voxels: 2000000
+    grid_resolution: 0.1
+    min_fitness: 0.65
+    max_rmse: 0.15
+    # Additional interlock; setting enable_hardware in launch alone is insufficient.
+    hardware_validation_complete: false
+    network_interface: ''
+    allowed_fsm_ids: [-1]  # Replace with verified walking-controller FSM IDs.
+    command_duration: 0.15
+    command_timeout: 0.25
+    health_timeout: 0.75
+    max_vx: 0.2
+    max_wz: 0.3
