@@ -60,6 +60,19 @@ def test_ros_map_save_service(tmp_path):
         node.destroy_node()
 
 
+def test_ros_map_recorder_without_session_publishes_but_refuses_save():
+    rclpy.init()
+    node = MapRecorder()
+    try:
+        node.record(cloud(np.array([[0., 0., 0.], [1., 0., 0.5]]), 'odom', node.get_clock().now().to_msg()))
+        node.publish_map()
+        response = node.save(Trigger.Request(), Trigger.Response())
+        assert not response.success
+        assert 'No session_directory' in response.message
+    finally:
+        node.destroy_node()
+
+
 def test_ros_dry_bridge_never_imports_sdk_and_rejects_missing_health():
     import sys
     rclpy.init()
