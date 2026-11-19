@@ -11,8 +11,9 @@ Implemented operating modes:
 | `mapping` | Unitree handheld remote only; no SDK bridge is launched | FAST-LIO plus bounded map recording |
 | `localization` | Unitree handheld remote only; no SDK bridge is launched | FAST-LIO plus initialized saved-map matching |
 | `navigation` | Nav2 through collision monitoring and an explicitly armed bridge | Saved-map matching plus live obstacle observations |
+| `teleop` | PC gamepad through collision monitoring and an explicitly armed bridge | FAST-LIO live map (optional save) plus live obstacle observations |
 
-**Default navigation is a dry run.** It publishes `/g1/command_preview` and
+**Default navigation and teleop are dry runs.** It publishes `/g1/command_preview` and
 does not import or connect to the Unitree SDK. Hardware mode also requires a
 separate validation interlock, a network interface, and verified walking FSM
 IDs. This repository has not been validated on a physical G1.
@@ -44,7 +45,8 @@ sudo apt-get update
 sudo apt-get install python3-vcstool python3-colcon-common-extensions \
   python3-rosdep python3-numpy python3-scipy python3-yaml python3-pytest \
   ros-humble-navigation2 ros-humble-nav2-bringup ros-humble-nav2-collision-monitor \
-  ros-humble-message-filters ros-humble-sensor-msgs-py libpcl-dev libeigen3-dev
+  ros-humble-message-filters ros-humble-sensor-msgs-py \
+  libpcl-dev libeigen3-dev
 bash scripts/prepare_dependencies.sh
 ```
 
@@ -142,6 +144,71 @@ to finalize the rosbag. Restart with a new session name to record another map.
 The recorder stops accepting additions beyond its voxel cap; an overflow
 invalidates saving that session rather than silently exporting a truncated map.
 
+## Manual driving with a gamepad and obstacle avoidance
+
+Teleop drives the G1 from a gamepad attached to a PC, through the same collision
+monitor and command gate as navigation. It also builds a live FAST-LIO map that
+can optionally be saved. **Drive only over wired Ethernet between the PC and the
+G1**; both machines need the same `ROS_DOMAIN_ID`.
+
+On the robot:
+
+```bash
+ros2 launch g1_navigation bringup.launch.py mode:=teleop \
+  livox_config:=/absolute/path/MID360_config.json \
+  robot_config:=/absolute/path/robot.yaml \
+  fastlio_config:=/absolute/path/fastlio.yaml \
+  [session_directory:=/absolute/path/maps/room_02]
+```
+
+On the PC (`sudo apt-get install ros-humble-joy ros-humble-rviz2`, plus this
+package built so the RViz layouts are installed):
+
+```bash
+ros2 launch g1_navigation pc.launch.py            # joy_node + RViz teleop layout
+ros2 launch g1_navigation pc.launch.py layout:=navigation joy_device_id:=1
+```
+
+The PC runs only `joy_node` and RViz. On the robot, `gamepad_teleop` turns
+`/joy` into `/cmd_vel` and an `operator` health signal. RViz (fixed frame
+`odom`) shows the live map `/mapping/map_cloud`, current obstacles, the stop
+and approach polygons, and a text marker with the gate state and output.
+
+| Control (Xbox layout) | Action |
+| --- | --- |
+| LB (hold) | Deadman: no motion unless held; releasing it stops immediately |
+| Left stick up/down | Forward up to 0.2 m/s, reverse up to 0.1 m/s |
+| Left stick left/right | Turn up to 0.3 rad/s |
+| Start, with LB held and sticks neutral | Arm (one request per press; never re-arms automatically) |
+| Back | Disarm |
+
+Speed increases are ramped; decreases and stops are immediate, and a stick
+reversal passes through zero. Releasing LB keeps the gate armed with zero
+output. If `/joy` stops for 0.25 s (gamepad unplugged, PC or link lost), the
+operator health fails and the gate disarms; re-arm with Start.
+
+Obstacle avoidance uses Nav2's **approach** model: the padded footprint is
+simulated along the command and speed is reduced to keep 1.2 s before contact,
+so driving towards an obstacle slows and then stops at the padded footprint,
+while turning or reversing away is not reduced. There is no direction-agnostic
+slowdown zone.
+
+**Close-contact freeze.** If anything is inside the padded footprint (5 cm
+around the Nav2 footprint) the collision monitor refuses **all** gamepad
+motion, including reversing and turning away. There is deliberately no escape
+path around the monitor: take over with the Unitree handheld remote, walk the
+robot clear, then re-arm with the gamepad.
+
+With `session_directory` set (absolute, must not exist), save the live map as
+in mapping mode with `ros2 service call /mapping/save std_srvs/srv/Trigger '{}'`.
+Without it, saving is refused and the bag (unless `record_bag:=false`) is
+written to a timestamped `teleop_*_bag` directory in the launch's working
+directory.
+
+Teleop is a dry run unless `enable_hardware:=true` with the same interlocks as
+navigation. In hardware mode the gate additionally requires a fresh, neutral
+Unitree remote; touching it takes over and disarms.
+
 ## Check localization before navigating
 
 ```bash
@@ -195,12 +262,19 @@ message fields, and native controller priority on your exact firmware.
 ## Safety contract and remaining validation
 
 ```text
-Nav2 controller -> /cmd_vel_nav -> velocity smoother -> /cmd_vel
-  -> collision monitor -> /cmd_vel_safe -> command gate -> bounded SDK velocity
+navigation: Nav2 controller -> /cmd_vel_nav -> velocity smoother -> /cmd_vel
+teleop:     joy_node (PC) -> /joy -> gamepad_teleop -> /cmd_vel
+  -> collision monitor (stop + approach polygons) -> /cmd_vel_safe
+  -> command gate -> bounded SDK velocity
 ```
 
-The gate checks perception, localization, robot FSM, operator connectivity,
-and command freshness using a monotonic watchdog. Hardware mode rejects replay
+The gate checks perception, robot FSM, and command freshness using a
+monotonic watchdog, plus localization in navigation. `operator` health is the
+dry-run heartbeat in navigation and the gamepad in teleop; `remote` health is
+the Unitree handheld remote in hardware mode (both profiles). Reverse is only
+allowed in teleop (0.1 m/s); navigation clamps it to zero. The collision
+monitor keeps forwarding zero commands so a stationary operator keeps the gate
+armed; it publishes only on input, so input loss still expires the command. Hardware mode rejects replay
 time. Fresh perception requires synchronized clouds/poses and confirmed geometry;
 it also rejects implausible odometry motion and excessive tilt. Missing IMU or
 LiDAR eventually stops synchronized output and expires that health input.
@@ -221,8 +295,12 @@ Before enabling hardware, measure and verify on the robot:
 5. Command expiry after killing the bridge or disconnecting Ethernet.
 6. Stops for stale clouds, rejected localization, excessive tilt, and unavailable FSM.
 7. Map completeness, unknown-space blocking, and physical exclusion of drop-offs.
+8. Teleop: stopping distance towards an obstacle at full gamepad speed; what the
+   LiDAR sees behind the robot when reversing; pulling the PC Ethernet and
+   unplugging the gamepad (robot stops within 0.25 s plus the command lease);
+   close-contact freeze recovery with the Unitree remote.
 
-The collision zones, speeds, and timeout values are commissioning defaults,
+The collision polygons, speeds, and timeout values are commissioning defaults,
 not a certified safety system. A flat-floor map is not a drop-off detector.
 FSM allowlisting is not complete robot health monitoring; battery/thermal/fault
 telemetry and an independent emergency-stop mechanism still require integration
@@ -250,15 +328,21 @@ python3 -m pytest -q
 ROS tests skip outside a ROS environment. After sourcing Humble and building,
 the same command also constructs and exercises ROS nodes, cloud conversions,
 map saving, and the dry-run bridge. CI runs both Python 3.10 and Humble checks.
-For a synthetic end-to-end check using the real Nav2 nodes:
+For synthetic end-to-end checks using the real Nav2 and collision-monitor nodes:
 
 ```bash
 python3 scripts/smoke_navigation.py
+python3 scripts/smoke_teleop.py
 ```
+
+Without a local Humble install, `bash scripts/ros_test.sh [pytest args]` runs the
+ROS tier in a `ros:humble-ros-base` container; `SMOKE=1` also runs both scripts.
 
 This creates a temporary room map, supplies synthetic FAST-LIO outputs, requests
 a goal, checks that a guarded velocity is produced, and interrupts sensor data
-to check the latched stop. It does not connect to hardware or model G1 dynamics.
+to check the latched stop. The teleop smoke drives `/joy` towards a synthetic wall and checks the approach
+slowdown, unreduced reverse, deadman release, close-contact freeze, and joystick
+loss. Neither connects to hardware or models G1 dynamics.
 It uses `start_sensors:=false`, which can also integrate separately launched
 driver/FAST-LIO nodes; those nodes must provide the documented input topics and
 keep their native TF isolated. Run tests on a separate ROS domain from a robot.
@@ -276,6 +360,9 @@ The initial implementation keeps related modules in one `ament_python` package:
 | `map_recorder.py`, `map_io.py` | Bounded voxel accumulation and map bundle export |
 | `localizer.py`, `registration.py` | Initialized planar registration using 3D nearest neighbors |
 | `command_bridge.py`, `safety.py` | Dry-run/hardware transport, command gate, watchdog, manual takeover |
+| `gamepad_teleop.py`, `teleop.py` | `/joy` to deadman-gated, ramped `/cmd_vel`, operator health, arm/disarm |
+| `footprint_publisher.py` | Padded footprint for the approach polygon in teleop (no costmap) |
+| `launch/pc.launch.py`, `rviz/` | PC-side `joy_node` and RViz layouts |
 | `launch/bringup.launch.py` | Mode isolation, dependency nodes, Nav2 configuration assembly |
 
 TF: `map -> odom -> base_footprint -> base_link -> mid360_imu`.
