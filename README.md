@@ -376,6 +376,19 @@ FSM allowlisting is not complete robot health monitoring; battery/thermal/fault
 telemetry and an independent emergency-stop mechanism still require integration
 appropriate to the installed G1 firmware and test environment.
 
+## Simulator
+
+`sim/` runs this stack unchanged against a MuJoCo G1 with a simulated head
+Mid360, in Docker, with scripted checks against ground truth:
+
+```bash
+sim/run.sh            # stack + simulated robot (teleop, dry run)
+sim/pc.sh             # RViz (+ gamepad)
+sim/run.sh --check    # scripted approach / obstacle-memory check
+```
+
+See [`sim/README.md`](sim/README.md) for what it does and does not model.
+
 ## Replay and tests
 
 Replay uses sensor inputs only. Do not replay recorded TF, odometry, or command
