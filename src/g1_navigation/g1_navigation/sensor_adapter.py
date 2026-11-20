@@ -28,8 +28,12 @@ class SensorAdapter(Node):
         # Keep obstacles until a beam sees through them (blind zone near the feet,
         # sparse scan pattern). max_age 0 publishes single scans only.
         memory_age = parameter(self, 'obstacle_memory_max_age', 30.0)
-        self.memory = ObstacleMemory(max_age=memory_age, radius=parameter(
-            self, 'obstacle_memory_radius', 3.0)) if memory_age != 0 else None
+        # Points above the sensor cannot be seen through by an upside-down head Mid360;
+        # a negative value keeps them for max_age like the rest.
+        above_age = parameter(self, 'obstacle_memory_above_sensor_age', -1.0)
+        self.memory = ObstacleMemory(max_age=memory_age, radius=parameter(self, 'obstacle_memory_radius', 3.0),
+                                     above_sensor_age=above_age if above_age >= 0 else None
+                                     ) if memory_age != 0 else None
         self.memory_pose = None
         values = np.r_[self.lower, self.upper, self.floor_offset, self.min_z, self.max_z, self.max_range]
         if (not np.isfinite(values).all() or self.lower.shape != (3,) or self.upper.shape != (3,)

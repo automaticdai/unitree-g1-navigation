@@ -33,3 +33,17 @@ def padded_footprint(nav2_overrides, costmap='local_costmap'):
     def pad(value):
         return value + padding if value > 0 else value - padding if value < 0 else value
     return [pad(float(value)) for point in yaml.safe_load(params['footprint']) for value in point]
+
+
+DIRECTION_DEADBAND = 1e-3  # m/s
+
+
+def directional_footprint(points, margin, vx):
+    """Flat [x0, y0, ...] polygon with its leading edge (along vx) pushed out by margin."""
+    out = list(points)
+    sign = 1 if vx > DIRECTION_DEADBAND else -1 if vx < -DIRECTION_DEADBAND else 0
+    if sign and margin > 0:
+        for i in range(0, len(out), 2):
+            if out[i] * sign > 0:
+                out[i] += sign * margin
+    return out

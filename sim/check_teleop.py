@@ -9,10 +9,11 @@ with the true robot pose, so odometry drift counts against the result.
   room:   arm, drive at full stick towards the 0.35 m box 2 m ahead. The approach
           zone must stop the robot short of the box without contact; while stopped
           the box (now in the LiDAR's near-field blind zone) must stay in
-          /perception/obstacles (obstacle memory); reversing away must be allowed.
+          /perception/obstacles (obstacle memory); the robot must stop outside the
+          freeze zone, so reversing away is allowed.
   person: stand still while a person-sized cylinder walks across 1.5 m ahead. It
-          must be detected, and obstacle points away from any real object
-          (ghosts left where the person was) must clear within 1.5 s.
+          must be detected; space it left must clear within 1.5 s where a beam can
+          see through, and within 2 s above the sensor where none can.
 """
 import argparse
 import collections
@@ -34,6 +35,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 AXIS_LINEAR, DEADMAN_AXIS, ARM = 1, 2, 7  # config/teleop.yaml
 GHOST_DISTANCE = 0.3  # m from any true object surface
 LIDAR_HEIGHT = 1.30   # m, head Mid360 optical centre while walking
+IMU_HEIGHT = 1.259    # m, the memory's 'above the sensor' threshold (IMU origin)
 
 
 def yaw_of(q):
@@ -222,14 +224,17 @@ def check_room(node):
     on_box = int(np.sum(box.distance(points) < 0.1))
     results = [
         ('stopped short of the box (truth clearance from footprint front)', clearance > 0.0, f'{clearance:.2f} m'),
+        ('stopped outside the padded footprint (freeze zone)', box_face - (x + node.front) > 0.0,
+         f'{box_face - (x + node.front):+.2f} m'),
         ('did not stop far from it', clearance < 0.6, f'{clearance:.2f} m'),
         ('no forward creep in the last 2 s while stopped', creep < 0.05, f'{creep:+.3f} m'),
         ('box still in /perception/obstacles while in the blind zone', on_box >= 5, f'{on_box} points'),
         ('peak true speed (1 s mean) within the 0.2 m/s gamepad limit', peak < 0.23, f'{peak:.2f} m/s'),
     ]
     # Reverse away must be allowed.
-    # Reverse away must be allowed, unless the box is (nearly) inside the padded footprint:
-    # then the close-contact freeze blocks all motion by design (Unitree remote takes over).
+    # Reverse away must be allowed: footprint_publisher's direction margin stops the robot
+    # before the box reaches the freeze zone. Only a box truly inside the padded footprint
+    # justifies the close-contact freeze.
     x0 = node.pose[0]
     padded_clearance = box_face - (x0 + node.front)
     node.joy['lin'] = -1.0
@@ -238,8 +243,8 @@ def check_room(node):
     if backed > 0.1:
         results.append(('reverse away from the box allowed', True, f'{backed:.2f} m in 3 s'))
     else:
-        frozen = padded_clearance < 0.05
-        results.append(('reverse blocked: close-contact freeze, box at the padded footprint (by design)'
+        frozen = padded_clearance < 0.0  # the freeze is only correct if the box is truly inside
+        results.append(('reverse blocked: close-contact freeze, box inside the padded footprint'
                         if frozen else 'reverse away from the box allowed', frozen,
                         f'{backed:.2f} m in 3 s; true padded clearance {padded_clearance:+.2f} m'))
     node.joy.update(lin=0.0, deadman=False)
@@ -259,11 +264,11 @@ def check_person(node):
     GHOST_DISTANCE of it. Points the LiDAR can see through should clear within ~1 s.
     Points with no recent beam within 0.5 deg of their direction (above the upside-down
     head Mid360's upper field-of-view edge, about +4..+10 deg with the mount's roll) can
-    never be seen through; they are reported separately as a warning.
+    never be seen through; obstacle_memory_above_sensor_age must expire them.
     """
     seen = samples = 0
     history = []        # (time, person x, y, radius)
-    in_view_ages, edge_ages, edge_peak = [], [], 0
+    in_view_ages, edge_ages, edge_peak, low_ages = [], [], 0, []
     end = time.monotonic() + 30
     last = None
     while time.monotonic() < end:
@@ -293,17 +298,23 @@ def check_person(node):
             len(node.obstacles_odom) == len(points) else np.zeros(len(ghosts), bool)
         valid = ~np.isnan(ages)
         in_view_ages += list(ages[valid & visible])
-        edge = valid & ~visible
+        # Unreachable points above the sensor must expire (obstacle_memory_above_sensor_age);
+        # those below it (near-field blind zone) are meant to persist until max age.
+        above = ghosts[:, 2] > IMU_HEIGHT
+        edge = valid & ~visible & above
         edge_ages += list(ages[edge])
         edge_peak = max(edge_peak, int(edge.sum()))
+        low_ages += list(ages[valid & ~visible & ~above])
     trail = float(np.percentile(in_view_ages, 95)) if in_view_ages else 0.0
     edge_max = max(edge_ages, default=0.0)
     return [
         ('person detected in most obstacle clouds', samples and seen / samples > 0.8, f'{seen}/{samples}'),
         ('vacated space clears within 1.5 s (95th pct age, points a beam can see through)', trail < 1.5,
          f'{trail:.1f} s'),
-        ('ghosts no beam reaches (above the FOV edge; held until max age)', None,
-         f'up to {edge_peak} points, oldest {edge_max:.0f} s' if edge_peak else 'none'),
+        ('unreachable points above the sensor clear within 2 s', edge_max < 2.0,
+         f'up to {edge_peak} points, oldest {edge_max:.1f} s' if edge_peak else 'none'),
+        ('unreachable points below the sensor (blind zone, kept by design)', None,
+         f'oldest {max(low_ages):.1f} s' if low_ages else 'none'),
     ]
 
 
@@ -323,7 +334,7 @@ def main():
     for name, ok, value in results:
         label = 'WARN' if ok is None else 'PASS' if ok else 'FAIL'
         print(f'{label}  {name:<{width}}  {value}')
-    failed = [name for name, ok, _ in results if ok is False]
+    failed = [name for name, ok, _ in results if ok is not None and not ok]
     print('ALL PASSED' if not failed else f'{len(failed)} FAILED')
     raise SystemExit(1 if failed else 0)
 

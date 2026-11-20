@@ -22,6 +22,9 @@
     # Obstacles persist until a LiDAR beam passes through them (0 = single scans only).
     obstacle_memory_max_age: 30.0
     obstacle_memory_radius: 3.0
+    # The head Mid360 sees at most ~+7 deg up: points above it cannot be seen through.
+    # Keep them only this long after they were last observed (passing heads).
+    obstacle_memory_above_sensor_age: 1.0
     voxel_resolution: 0.08
     max_voxels: 2000000
     grid_resolution: 0.1

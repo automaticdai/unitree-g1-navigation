@@ -3,6 +3,10 @@
 # (sensor_source:=utlidar, measured head mount), dry run, no bag.
 set -euo pipefail
 cd /ws
+# One BLAS/OpenMP thread per process. NumPy's OpenBLAS otherwise spins worker threads
+# on every core (the simulator reached ~1700 % CPU), starving the collision monitor so
+# that it saw obstacle clouds > source_timeout old and ignored them.
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
 # The simulated mount is exactly the configured one, so calibration is confirmed here.
 sed 's/calibration_confirmed: false/calibration_confirmed: true/' \
   src/g1_navigation/config/robot_g1_head.yaml > /tmp/robot_sim.yaml
