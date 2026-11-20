@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 rclpy = pytest.importorskip('rclpy')
+from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from std_srvs.srv import Trigger, SetBool
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
@@ -277,6 +278,30 @@ def test_ros_localizer_loads_map_and_waits_for_initial_pose(tmp_path):
         node.match(cloud(points, 'odom', node.get_clock().now().to_msg()))
         assert node.correction is None
         assert node.accepted == 0
+    finally:
+        node.destroy_node()
+
+
+def test_ros_localizer_republishes_accepted_correction_with_current_stamp(tmp_path):
+    points = np.random.default_rng(4).uniform([-2., -2., 0.], [2., 2., 1.8], (1000, 3))
+    directory = save_bundle(tmp_path / 'room', points, {})
+    rclpy.init(args=['--ros-args', '-p', f'map_directory:={directory}'])
+    node = Localizer()
+    sent = []
+    node.tf.sendTransform = sent.append
+    try:
+        node.republish()
+        assert sent == []  # nothing accepted yet
+        node.published = np.eye(4)
+        node.published[0, 3] = 0.5
+        node.republish()
+        (msg,) = sent
+        assert (msg.header.frame_id, msg.child_frame_id) == ('map', 'odom')
+        assert msg.transform.translation.x == pytest.approx(0.5)
+        now = node.get_clock().now().nanoseconds * 1e-9
+        assert now - (msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9) < 0.1
+        node.initialize(PoseWithCovarianceStamped())  # re-initialization stops republishing
+        assert node.published is None
     finally:
         node.destroy_node()
 
