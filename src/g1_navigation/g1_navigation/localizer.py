@@ -27,6 +27,13 @@ class Localizer(Node):
         self.accepted = 0
         self.last_run = -float('inf')
         self.tf = TransformBroadcaster(self)
+        # Last accepted map -> odom, republished at a fixed rate stamped "now". Matching
+        # runs at most every 0.2 s and stamps with the scan time, so map -> odom alone
+        # could be older than Nav2's transform_tolerance (0.3 s) relative to the robot
+        # pose, and the controller aborted goals ("Transform data too old"). The
+        # correction varies slowly; localization health still gates motion.
+        self.published = None
+        self.create_timer(0.05, self.republish)
         self.diagnostics = self.create_publisher(DiagnosticArray, '/health/localization', 5)
         self.create_subscription(Odometry, '/odom', self.odometry, qos_profile_sensor_data)
         self.create_subscription(PoseWithCovarianceStamped, '/initialpose', self.initialize, 1)
@@ -35,8 +42,12 @@ class Localizer(Node):
     def odometry(self, msg):
         self.latest_odom = msg
 
+    def republish(self):
+        if self.published is not None:
+            self.tf.sendTransform(tf_message('map', 'odom', self.published, self.get_clock().now().to_msg()))
+
     def initialize(self, msg):
-        self.correction, self.accepted = None, 0
+        self.correction, self.accepted, self.published = None, 0, None
         try:
             if msg.header.frame_id != 'map' or self.latest_odom is None:
                 raise ValueError('Initial pose needs map frame and live odometry')
@@ -74,6 +85,7 @@ class Localizer(Node):
                 raise ValueError('Map correction jumped; reinitialize localization')
             self.correction = candidate
             self.accepted += 1
+            self.published = candidate
             self.tf.sendTransform(tf_message('map', 'odom', candidate, msg.header.stamp))
             health(self, self.diagnostics, 'localization', self.accepted >= 3,
                    f'overlap={fitness:.2f}, rmse={rmse:.3f}', msg.header.stamp)
