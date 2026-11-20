@@ -14,6 +14,7 @@ import time
 import numpy as np
 import rclpy
 from rclpy.action import ActionClient
+from rclpy.time import Time
 from rclpy.node import Node
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from geometry_msgs.msg import PolygonStamped, PoseWithCovarianceStamped, Twist
@@ -23,6 +24,7 @@ from lifecycle_msgs.srv import GetState
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, String
 from std_srvs.srv import SetBool
+from tf2_ros import Buffer, TransformListener
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from g1_navigation.map_io import save_bundle
@@ -89,6 +91,14 @@ def main():
             node.create_subscription(PolygonStamped, '/approach_zone', lambda msg: state.update(approach=(
                 max((abs(p.x) for p in msg.polygon.points), default=0.),
                 max((abs(p.y) for p in msg.polygon.points), default=0.))), 10)
+            # Nav2's costmaps need map -> odom -> base_footprint before a goal can run;
+            # arming and sending the single goal earlier intermittently failed the goal.
+            tf_buffer = Buffer()
+            tf_listener = TransformListener(tf_buffer, node)  # noqa: F841 (keeps the subscription)
+
+            def transforms_ready():
+                return all(tf_buffer.can_transform(parent, 'base_footprint', Time())
+                           for parent in ('odom', 'map'))
             arm = node.create_client(SetBool, '/g1/arm')
             lifecycle = node.create_client(GetState, '/bt_navigator/get_state')
             navigator = ActionClient(node, NavigateToPose, '/navigate_to_pose')
@@ -124,7 +134,8 @@ def main():
                         elif lifecycle_future.done():
                             active = lifecycle_future.result().current_state.id == 3
                             lifecycle_future = None
-                    if active and state['localized'] and state['perception'] and arm_future is None and arm.service_is_ready() and navigator.server_is_ready():
+                    if (active and state['localized'] and state['perception'] and arm_future is None
+                            and arm.service_is_ready() and navigator.server_is_ready() and transforms_ready()):
                         arm_future = arm.call_async(SetBool.Request(data=True))
                     if arm_future is not None and arm_future.done() and goal_future is None:
                         if not arm_future.result().success:
