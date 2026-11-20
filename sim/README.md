@@ -84,29 +84,39 @@ substitute for the live tests.
 
 ### Findings for the real robot
 
-1. **Approach-stop ends at the freeze boundary.** The approach model stops the
-   robot right at the padded footprint, and the close-contact freeze trips when
-   anything is inside it. A few centimetres of gait sway or overshoot decide
-   whether you can still reverse away, or must take over with the Unitree remote.
-   In two otherwise identical runs, one could reverse and one froze. A margin
-   would fix this: give the approach polygon a larger footprint than the freeze
-   zone.
-2. **Head-height ghosts above the FOV edge.** The upside-down head Mid360 sees at
-   most about +7 deg above horizontal (+4 to +10 deg with the mount's roll).
-   Parts of a person above that, such as the head and shoulders at 1.5-2.5 m,
-   are hit only during pitch sway, and no later beam can see through them.
-   Memory then holds them until `obstacle_memory_max_age` (30 s), blocking forward
-   driving. This is the top-edge twin of the known near-field blind-zone ghosts.
-   Options:
-   - forget points outside the current FOV after a shorter age;
-   - remember only points below the sensor height, since memory exists for the
-     low blind zone.
+1. **Approach-stop ended at the freeze boundary** (fixed). The approach model
+   stopped the robot right at the padded footprint, which is also Humble's
+   close-contact freeze zone, so gait sway decided whether reversing away was
+   still allowed. `footprint_publisher` now pushes the approach footprint's
+   leading edge out by `direction_margin` (0.10 m) along the commanded
+   direction. In 4 of 4 runs the robot stopped 0.07 m outside the freeze zone,
+   and reverse was allowed every time.
+2. **Head-height ghosts above the FOV edge** (fixed). The upside-down head Mid360
+   sees at most about +7 deg above horizontal, so points above it (a passing
+   person's head) were never seen through and were held for 30 s. Memory now
+   keeps points above the sensor only `obstacle_memory_above_sensor_age` (1 s)
+   after they were last observed. Measured: at most 6 points, cleared within 0.8 s.
 3. **Posture sensitivity of the floor.** If the robot's attitude relative to the
    calibration pose differs by about 2.5 deg, floor returns 2-4 m away rise over
    `obstacle_min_height` (0.10 m) and memory accumulates them. The sim showed
    this before its mount was matched to the measured one. Walking at 0.2 m/s
    changes the policy's posture by about 0.9 deg. Check the real robot with
    `tools/floor_fit.py` (standing and walking).
+4. **A late obstacle cloud is treated as no obstacles.** Humble's collision
+   monitor ignores a source older than `source_timeout` (0.3 s), so a late cloud
+   briefly disables avoidance. The command gate only catches stale perception
+   after 0.75 s. In the sim this happened during approaches (full-speed lurches,
+   stop point varying by 6 cm), caused by NumPy's OpenBLAS spinning threads on
+   every core (simulator at ~1700 % CPU) and starving the monitor. All processes
+   now run with one BLAS thread (`bringup.launch.py`, `docker/start_stack.sh`),
+   which removed it (0 ignored clouds in 5 runs). Anything else that delays the
+   monitor would reopen the window: measure cloud age on the robot with
+   `tools/cloud_age.py` and consider raising `source_timeout` or gating on cloud
+   age.
+5. **Open:** in the person scenario, a few points below the sensor that no
+   recent beam reached lasted up to 3.8 s. They may be a limit of the check
+   (it only looks at the last ~1 s of beams) rather than of memory. Not
+   investigated.
 
 ## Fidelity: what this does and does not test
 
@@ -153,6 +163,7 @@ Not the robot:
 | `check_teleop.py` | Scripted checks |
 | `tools/floor_fit.py` | Floor plane in odom from `/mapping/points`: mount check, also on the real robot |
 | `tools/ghosts.py` | Where obstacle points far from any true object are (simulator) |
+| `tools/cloud_age.py`, `tools/cloud_gaps.py` | Age and arrival gaps of a cloud topic: collision-monitor input latency |
 | `tools/export_policy.py` | Re-export the policy weights (needs PyTorch) |
 | `docker/` | Image and in-container start script |
 

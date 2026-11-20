@@ -38,12 +38,13 @@ Unitree remote.
 
 ## Found in simulation (sim/, 2026-11-19), to confirm on the robot
 
-- Approach-stop ends at the close-contact freeze boundary: sway decides whether
-  reverse is still allowed (one run reversed, one froze). Consider a larger
-  approach footprint than the freeze zone.
-- Head-height ghosts above the Mid360's upper FOV edge (~+7 deg) cannot be seen
-  through and are held for `obstacle_memory_max_age`; a passing person can block
-  forward driving for up to 30 s.
+- Fixed in sim: approach-stop at the freeze boundary (`direction_margin`) and
+  head-height ghosts above the FOV edge (`obstacle_memory_above_sensor_age`).
+  Confirm both live (items 1 and 3).
+- A late obstacle cloud (> `source_timeout` 0.3 s) is treated as no obstacles by
+  Humble's collision monitor; the gate only stops after 0.75 s. Measure
+  `/perception/obstacles` age on the robot (`sim/tools/cloud_age.py`) under
+  load; decide on raising `source_timeout` or gating on cloud age.
 - ~2.5 deg attitude change vs the calibration pose lifts floor returns 2-4 m away
   over `obstacle_min_height`. Check standing and walking with
   `sim/tools/floor_fit.py /mapping/points` during item 2.

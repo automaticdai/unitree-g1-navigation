@@ -8,7 +8,8 @@ import time
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction,
+                            SetEnvironmentVariable)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -133,7 +134,13 @@ def collision_monitor(share, replay, overrides=None):
 
 def generate_launch_description():
     share = Path(get_package_share_directory('g1_navigation'))
-    return LaunchDescription([
+    # One BLAS/OpenMP thread per process: NumPy's OpenBLAS otherwise spins worker threads
+    # on every core. In simulation that starved the collision monitor until it saw
+    # obstacle clouds older than source_timeout, and Humble then treats a stale source
+    # as no obstacles. Set before any node starts (inherited by all processes).
+    blas = [SetEnvironmentVariable(name, '1') for name in
+            ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS')]
+    return LaunchDescription(blas + [
         DeclareLaunchArgument('mode', default_value='mapping',
                               choices=['mapping', 'localization', 'navigation', 'teleop']),
         DeclareLaunchArgument('replay', default_value='false', choices=['true', 'false']),

@@ -35,6 +35,7 @@ from visualization_msgs.msg import Marker, MarkerArray
 AXIS_LINEAR, DEADMAN_AXIS, ARM = 1, 2, 7  # config/teleop.yaml
 GHOST_DISTANCE = 0.3  # m from any true object surface
 LIDAR_HEIGHT = 1.30   # m, head Mid360 optical centre while walking
+IMU_HEIGHT = 1.259    # m, the memory's 'above the sensor' threshold (IMU origin)
 
 
 def yaw_of(q):
@@ -267,7 +268,7 @@ def check_person(node):
     """
     seen = samples = 0
     history = []        # (time, person x, y, radius)
-    in_view_ages, edge_ages, edge_peak = [], [], 0
+    in_view_ages, edge_ages, edge_peak, low_ages = [], [], 0, []
     end = time.monotonic() + 30
     last = None
     while time.monotonic() < end:
@@ -297,17 +298,23 @@ def check_person(node):
             len(node.obstacles_odom) == len(points) else np.zeros(len(ghosts), bool)
         valid = ~np.isnan(ages)
         in_view_ages += list(ages[valid & visible])
-        edge = valid & ~visible
+        # Unreachable points above the sensor must expire (obstacle_memory_above_sensor_age);
+        # those below it (near-field blind zone) are meant to persist until max age.
+        above = ghosts[:, 2] > IMU_HEIGHT
+        edge = valid & ~visible & above
         edge_ages += list(ages[edge])
         edge_peak = max(edge_peak, int(edge.sum()))
+        low_ages += list(ages[valid & ~visible & ~above])
     trail = float(np.percentile(in_view_ages, 95)) if in_view_ages else 0.0
     edge_max = max(edge_ages, default=0.0)
     return [
         ('person detected in most obstacle clouds', samples and seen / samples > 0.8, f'{seen}/{samples}'),
         ('vacated space clears within 1.5 s (95th pct age, points a beam can see through)', trail < 1.5,
          f'{trail:.1f} s'),
-        ('ghosts no beam reaches (above the sensor) clear within 2 s', edge_max < 2.0,
+        ('unreachable points above the sensor clear within 2 s', edge_max < 2.0,
          f'up to {edge_peak} points, oldest {edge_max:.1f} s' if edge_peak else 'none'),
+        ('unreachable points below the sensor (blind zone, kept by design)', None,
+         f'oldest {max(low_ages):.1f} s' if low_ages else 'none'),
     ]
 
 
