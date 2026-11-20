@@ -261,6 +261,21 @@ def test_utlidar_source_relays_instead_of_driving_the_sensor():
         _build_launch(mode='teleop', start_sensors='true', sensor_source='livox')
 
 
+def test_bag_records_the_selected_sensor_source(tmp_path):
+    from launch.actions import ExecuteProcess
+
+    def recorded(source):
+        actions = _build_launch(mode='teleop', record_bag='true', sensor_source=source,
+                                session_directory=str(tmp_path / source))
+        commands = [[getattr(part[0], 'text', None) for part in a.cmd]
+                    for a in actions if isinstance(a, ExecuteProcess)]
+        return next(cmd for cmd in commands if cmd[:3] == ['ros2', 'bag', 'record'])
+
+    assert {'/g1/lidar/points', '/g1/lidar/imu'} <= set(recorded('utlidar'))
+    assert '/livox/lidar' not in recorded('utlidar')
+    assert {'/livox/lidar', '/livox/imu'} <= set(recorded('livox'))
+
+
 def test_teleop_hardware_replay_rejected(tmp_path):
     with pytest.raises(ValueError):
         _build_launch(mode='teleop', replay='true', enable_hardware='true')

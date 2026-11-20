@@ -16,7 +16,9 @@ Implemented operating modes:
 **Default navigation and teleop are dry runs.** It publishes `/g1/command_preview` and
 does not import or connect to the Unitree SDK. Hardware mode also requires a
 separate validation interlock, a network interface, and verified walking FSM
-IDs. This repository has not been validated on a physical G1.
+IDs. On a physical G1 only perception has been exercised (head Mid360, FAST-LIO,
+mount calibration, gamepad dry run); no SDK velocity command has been sent. See
+[`docs/BACKLOG.md`](docs/BACKLOG.md) for current status.
 
 ## Scope and assumptions
 
@@ -108,6 +110,61 @@ Prepare a Mid360 JSON using the pinned driver's `config/MID360_config.json`
 and configure the actual sensor/host Ethernet addresses. Pass its absolute path
 as `livox_config`; no sensor addresses are guessed by this repository.
 
+### G1 head Mid360 (`sensor_source:=utlidar`)
+
+The G1's built-in head Mid360 is owned by Unitree's onboard software, which
+publishes it on DDS domain 0 as `/utlidar/cloud_livox_mid360` and
+`/utlidar/imu_livox_mid360`. Running `livox_ros_driver2` against it would take
+the sensor stream away from Unitree's services, so use the onboard stream
+instead:
+
+```bash
+ros2 launch g1_navigation bringup.launch.py mode:=teleop sensor_source:=utlidar \
+  robot_config:=$(ros2 pkg prefix g1_navigation)/share/g1_navigation/config/robot_g1_head.yaml
+```
+
+With `sensor_source:=utlidar`, no `livox_config` is needed and the launch:
+
+- starts `utlidar_relay`, which listens on `source_domain_id` (default `0`)
+  through a separate ROS context, so this stack's own topics stay in its
+  `ROS_DOMAIN_ID`. It only subscribes; it never reconfigures the sensor;
+- restamps cloud and IMU with one estimated clock offset (the robot's clock was
+  ~27 min off the PC's), converts IMU acceleration from g to m/s², and
+  publishes `/g1/lidar/points` and `/g1/lidar/imu`;
+- selects `config/fastlio_g1.yaml` (PointCloud2 with per-point time) unless
+  `fastlio_config` is given.
+
+`config/robot_g1_head.yaml` holds the mount measured on a standing G1: sensor
+upside down, x forward to ~1°, 3.2° tilt, IMU 1.259 m above the floor. The
+base-to-IMU horizontal offset is not measured (0), and the waist yaw joint
+moves the head relative to the legs; walking keeps it near zero.
+`calibration_confirmed` is still `false`: set it only after checking on site
+that the RViz zones are centred on the robot and walls stay straight and single
+in the map while walking and turning.
+
+The upside-down head sensor cannot see the floor within ~0.96 m of the robot;
+at 0.5 m only objects taller than ~0.6 m are visible. Obstacle memory (below)
+covers objects seen before they entered this zone, not ones that appear inside it.
+
+### Obstacle memory
+
+A single Mid360 scan is sparse, and a low obstacle leaves the head LiDAR's view
+as the robot walks up to it. `sensor_adapter` therefore keeps obstacle points in
+`odom` and publishes them in `/perception/obstacles` until a beam in a later
+scan passes **through** them (a return farther away in the same direction),
+which is evidence that the space is now free. Points that cannot be seen through
+are kept, bounded by:
+
+| Parameter (`robot*.yaml`) | Default | Meaning |
+| --- | --- | --- |
+| `obstacle_memory_max_age` | `30.0` s | Forget a point after this long; `0` disables memory (single scans only) |
+| `obstacle_memory_radius` | `3.0` m | Forget points farther than this from the robot |
+
+Memory resets after a perception gap over 0.5 s or an implausible odometry jump.
+Something that stood in the blind zone and then left can leave ghost points that
+block forward motion until they are seen through (e.g. reverse away) or expire.
+Memory is unit and ROS tested but not yet live-tested on the robot.
+
 ## Manual mapping with the handheld controller
 
 ```bash
@@ -173,6 +230,18 @@ The PC runs only `joy_node` and RViz. On the robot, `gamepad_teleop` turns
 `/joy` into `/cmd_vel` and an `operator` health signal. RViz (fixed frame
 `odom`) shows the live map `/mapping/map_cloud`, current obstacles, the stop
 and approach polygons, and a text marker with the gate state and output.
+
+The teleop layout also has a **Camera (D435)** panel showing
+`/camera/color/image_raw`. The stack does not start the camera; run the driver
+on the G1's PC2 (ROS Foxy) in the stack's domain:
+
+```bash
+ssh g1-pc2 'ROS_DOMAIN_ID=42 bash -s' < scripts/pc2_camera.sh
+```
+
+It is a colour-only preview (640x480; ~7 Hz observed, cause not investigated)
+and nothing in the stack consumes it. If Unitree's video service starts
+streaming, it and this driver compete for the RGB sensor.
 
 | Control (Xbox layout) | Action |
 | --- | --- |
@@ -319,6 +388,10 @@ ros2 launch g1_navigation bringup.launch.py mode:=mapping replay:=true \
 ros2 bag play /absolute/path/maps/room_01_bag --clock \
   --topics /livox/lidar /livox/imu
 ```
+
+For a bag recorded with `sensor_source:=utlidar`, add `sensor_source:=utlidar` to
+the launch (the relay is not started in replay) and play the relayed topics:
+`--topics /g1/lidar/points /g1/lidar/imu`.
 
 Lightweight tests need Python, NumPy, SciPy, PyYAML, and pytest:
 
