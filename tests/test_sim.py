@@ -29,11 +29,20 @@ def test_policy_standing_targets_stay_near_default_pose():
     assert not policy.h.any() and not policy.action.any()
 
 
-mujoco = pytest.importorskip('mujoco')
-pytest.importorskip('mujoco_lidar')
-needs_model = pytest.mark.skipif(not (ASSETS / 'unitree_rl_gym').is_dir(), reason='run sim/fetch_assets.sh')
+# Per-test markers, not a module-level importorskip: with Ubuntu 22.04's pytest 6.2.5
+# a module-level skip here ended the whole session as "1 skipped" (exit code 5).
+try:
+    import mujoco  # noqa: F401
+    import mujoco_lidar  # noqa: F401
+    HAVE_MUJOCO = True
+except ImportError:
+    HAVE_MUJOCO = False
+needs_mujoco = pytest.mark.skipif(not HAVE_MUJOCO, reason='needs mujoco and mujoco-lidar')
+needs_model = pytest.mark.skipif(not (HAVE_MUJOCO and (ASSETS / 'unitree_rl_gym').is_dir()),
+                                 reason='needs mujoco and sim/fetch_assets.sh')
 
 
+@needs_mujoco
 def test_frame_builder_offsets_and_layout():
     from g1_sim.mid360 import POINT_DTYPE, FrameBuilder
     frame = FrameBuilder()
